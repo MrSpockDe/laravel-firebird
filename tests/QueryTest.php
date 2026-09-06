@@ -892,7 +892,7 @@ class QueryTest extends TestCase
         $this->assertEquals($highestId, $results->first()->id);
         $this->assertEquals($lowestId, $results->last()->id);
 
-        $results = $query->reorder()->get();
+        $results = $query->reorder('id')->get();
 
         $this->assertEquals($lowestId, $results->first()->id);
         $this->assertEquals($highestId, $results->last()->id);
