@@ -56,3 +56,13 @@ jobs:
 
       - name: Run tests
         run: vendor/bin/phpunit
+
+  ci-success:
+    needs: test
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Verify test matrix
+        run: |
+          test "${{ needs.test.result }}" = "success"
