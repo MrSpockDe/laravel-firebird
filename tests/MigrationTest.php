@@ -713,6 +713,221 @@ class MigrationTest extends TestCase
         }
     }
 
+    #[Test]
+    public function it_drops_an_index_with_a_generated_name()
+    {
+        Schema::dropIfExists('drop_index_test');
+
+        try {
+            Schema::create('drop_index_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value');
+                $table->index('value');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT TRIM(i.RDB$INDEX_NAME) AS "index_name"
+                FROM RDB$INDICES i
+                JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+                WHERE i.RDB$RELATION_NAME = 'drop_index_test'
+                  AND i.RDB$INDEX_NAME = 'drop_index_test_value_index'
+                  AND s.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $this->assertNotNull(DB::selectOne($metadataSql));
+
+            Schema::table('drop_index_test', function (Blueprint $table) {
+                $table->dropIndex(['value']);
+            });
+
+            $this->assertNull(DB::selectOne($metadataSql));
+        } finally {
+            Schema::dropIfExists('drop_index_test');
+        }
+    }
+
+    #[Test]
+    public function it_drops_an_index_with_an_explicit_name()
+    {
+        Schema::dropIfExists('drop_named_index_test');
+
+        try {
+            Schema::create('drop_named_index_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value');
+                $table->index('value', 'explicit_value_index');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT TRIM(i.RDB$INDEX_NAME) AS "index_name"
+                FROM RDB$INDICES i
+                JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+                WHERE i.RDB$RELATION_NAME = 'drop_named_index_test'
+                  AND i.RDB$INDEX_NAME = 'explicit_value_index'
+                  AND s.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $this->assertNotNull(DB::selectOne($metadataSql));
+
+            Schema::table('drop_named_index_test', function (Blueprint $table) {
+                $table->dropIndex('explicit_value_index');
+            });
+
+            $this->assertNull(DB::selectOne($metadataSql));
+        } finally {
+            Schema::dropIfExists('drop_named_index_test');
+        }
+    }
+
+    #[Test]
+    public function it_drops_a_unique_constraint()
+    {
+        Schema::dropIfExists('drop_unique_test');
+
+        try {
+            Schema::create('drop_unique_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value');
+                $table->unique('value');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT TRIM(rc.RDB$CONSTRAINT_NAME) AS "constraint_name"
+                FROM RDB$RELATION_CONSTRAINTS rc
+                JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = rc.RDB$INDEX_NAME
+                WHERE rc.RDB$RELATION_NAME = 'drop_unique_test'
+                  AND rc.RDB$CONSTRAINT_NAME = 'drop_unique_test_value_unique'
+                  AND rc.RDB$CONSTRAINT_TYPE = 'UNIQUE'
+                  AND s.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $this->assertNotNull(DB::selectOne($metadataSql));
+
+            Schema::table('drop_unique_test', function (Blueprint $table) {
+                $table->dropUnique(['value']);
+            });
+
+            $this->assertNull(DB::selectOne($metadataSql));
+        } finally {
+            Schema::dropIfExists('drop_unique_test');
+        }
+    }
+
+    #[Test]
+    public function it_drops_a_primary_key()
+    {
+        Schema::dropIfExists('drop_primary_test');
+
+        try {
+            Schema::create('drop_primary_test', function (Blueprint $table) {
+                $table->integer('id');
+                $table->primary('id');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT TRIM(rc.RDB$CONSTRAINT_NAME) AS "constraint_name"
+                FROM RDB$RELATION_CONSTRAINTS rc
+                JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = rc.RDB$INDEX_NAME
+                WHERE rc.RDB$RELATION_NAME = 'drop_primary_test'
+                  AND rc.RDB$CONSTRAINT_TYPE = 'PRIMARY KEY'
+                  AND s.RDB$FIELD_NAME = 'id'
+            SQL;
+
+            $this->assertNotNull(DB::selectOne($metadataSql));
+
+            Schema::table('drop_primary_test', function (Blueprint $table) {
+                $table->dropPrimary();
+            });
+
+            $this->assertNull(DB::selectOne($metadataSql));
+        } finally {
+            Schema::dropIfExists('drop_primary_test');
+        }
+    }
+
+    #[Test]
+    public function it_drops_an_index_with_a_long_generated_name()
+    {
+        Schema::dropIfExists('drop_long_index_test');
+        $generatedName = null;
+
+        try {
+            Schema::create('drop_long_index_test', function (Blueprint $table) use (&$generatedName) {
+                $table->id();
+                $table->string('long_identifier_value');
+                $generatedName = $table->index('long_identifier_value')->index;
+            });
+
+            $this->assertGreaterThan(31, strlen($generatedName));
+
+            $object = DB::selectOne(<<<'SQL'
+                SELECT TRIM(o.RDB$INDEX_NAME) AS "object_name"
+                FROM RDB$INDICES o
+                JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = o.RDB$INDEX_NAME
+                WHERE o.RDB$RELATION_NAME = 'drop_long_index_test'
+                  AND s.RDB$FIELD_NAME = 'long_identifier_value'
+            SQL);
+
+            $this->assertNotNull($object);
+            $this->assertSame(substr($generatedName, 0, 31), $object->object_name);
+
+            Schema::table('drop_long_index_test', function (Blueprint $table) {
+                $table->dropIndex(['long_identifier_value']);
+            });
+
+            $this->assertNull(DB::selectOne(<<<'SQL'
+                SELECT RDB$INDEX_NAME
+                FROM RDB$INDICES
+                WHERE RDB$RELATION_NAME = 'drop_long_index_test'
+                  AND RDB$INDEX_NAME = ?
+            SQL, [$object->object_name]));
+        } finally {
+            Schema::dropIfExists('drop_long_index_test');
+        }
+    }
+
+    #[Test]
+    public function it_drops_a_unique_constraint_with_a_long_generated_name()
+    {
+        Schema::dropIfExists('drop_long_unique_test');
+        $generatedName = null;
+
+        try {
+            Schema::create('drop_long_unique_test', function (Blueprint $table) use (&$generatedName) {
+                $table->id();
+                $table->string('long_identifier_value');
+                $generatedName = $table->unique('long_identifier_value')->index;
+            });
+
+            $this->assertGreaterThan(31, strlen($generatedName));
+
+            $object = DB::selectOne(<<<'SQL'
+                SELECT TRIM(o.RDB$CONSTRAINT_NAME) AS "object_name"
+                FROM RDB$RELATION_CONSTRAINTS o
+                JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = o.RDB$INDEX_NAME
+                WHERE o.RDB$RELATION_NAME = 'drop_long_unique_test'
+                  AND o.RDB$CONSTRAINT_TYPE = 'UNIQUE'
+                  AND s.RDB$FIELD_NAME = 'long_identifier_value'
+            SQL);
+
+            $this->assertNotNull($object);
+            $this->assertSame(substr($generatedName, 0, 31), $object->object_name);
+
+            Schema::table('drop_long_unique_test', function (Blueprint $table) {
+                $table->dropUnique(['long_identifier_value']);
+            });
+
+            $this->assertNull(DB::selectOne(<<<'SQL'
+                SELECT RDB$CONSTRAINT_NAME
+                FROM RDB$RELATION_CONSTRAINTS
+                WHERE RDB$RELATION_NAME = 'drop_long_unique_test'
+                  AND RDB$CONSTRAINT_NAME = ?
+            SQL, [$object->object_name]));
+        } finally {
+            Schema::dropIfExists('drop_long_unique_test');
+        }
+    }
+
     public static function incrementTypes(): array
     {
         return [

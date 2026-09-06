@@ -254,6 +254,51 @@ class FirebirdGrammar extends Grammar
     }
 
     /**
+     * Compile a drop index command.
+     *
+     * @return string
+     */
+    public function compileDropIndex(Blueprint $blueprint, Fluent $command)
+    {
+        return 'DROP INDEX '.$this->wrap(substr($command->index, 0, 31));
+    }
+
+    /**
+     * Compile a drop unique constraint command.
+     *
+     * @return string
+     */
+    public function compileDropUnique(Blueprint $blueprint, Fluent $command)
+    {
+        return 'ALTER TABLE '.$this->wrapTable($blueprint)
+            .' DROP CONSTRAINT '.$this->wrap(substr($command->index, 0, 31));
+    }
+
+    /**
+     * Compile a drop primary key command using its Firebird-assigned name.
+     *
+     * @return string
+     */
+    public function compileDropPrimary(Blueprint $blueprint, Fluent $command)
+    {
+        $table = $this->quoteString($this->connection->getTablePrefix().$blueprint->getTable());
+        $sql = $this->quoteString('ALTER TABLE '.$this->wrapTable($blueprint).' DROP CONSTRAINT ');
+
+        return <<<SQL
+            EXECUTE BLOCK AS
+            DECLARE VARIABLE constraint_name VARCHAR(63);
+            BEGIN
+                SELECT TRIM(RDB\$CONSTRAINT_NAME)
+                FROM RDB\$RELATION_CONSTRAINTS
+                WHERE RDB\$RELATION_NAME = {$table}
+                  AND RDB\$CONSTRAINT_TYPE = 'PRIMARY KEY'
+                INTO :constraint_name;
+                EXECUTE STATEMENT {$sql} || '"' || REPLACE(constraint_name, '"', '""') || '"';
+            END
+        SQL;
+    }
+
+    /**
      * Compile a foreign key command.
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
