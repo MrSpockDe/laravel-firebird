@@ -30,6 +30,30 @@ class FirebirdProcessor extends Processor
         }, $results);
     }
 
+    /** @inheritDoc */
+    public function processIndexes($results)
+    {
+        $indexes = [];
+
+        foreach ($results as $result) {
+            $result = (object) $result;
+
+            $indexes[$result->name] ??= [
+                'name' => $result->name,
+                'columns' => [],
+                'type' => $result->type,
+                'unique' => (bool) $result->unique,
+                'primary' => (bool) $result->primary,
+            ];
+
+            if ($result->column_name !== null) {
+                $indexes[$result->name]['columns'][] = $result->column_name;
+            }
+        }
+
+        return array_values($indexes);
+    }
+
     /**
      * Process an "insert get ID" query.
      *

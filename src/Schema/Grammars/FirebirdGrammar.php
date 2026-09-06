@@ -55,6 +55,31 @@ class FirebirdGrammar extends Grammar
     }
 
     /**
+     * Compile the query to determine the indexes and their ordered columns.
+     *
+     * @param  string|null  $schema
+     * @param  string  $table
+     * @return string
+     */
+    public function compileIndexes($schema, $table)
+    {
+        return sprintf(<<<'SQL'
+            SELECT TRIM(TRAILING FROM i.RDB$INDEX_NAME) AS "name",
+                   TRIM(TRAILING FROM s.RDB$FIELD_NAME) AS "column_name",
+                   'btree' AS "type",
+                   COALESCE(i.RDB$UNIQUE_FLAG, 0) AS "unique",
+                   CASE WHEN rc.RDB$CONSTRAINT_TYPE = 'PRIMARY KEY' THEN TRUE ELSE FALSE END AS "primary"
+            FROM RDB$INDICES i
+            LEFT JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+            LEFT JOIN RDB$RELATION_CONSTRAINTS rc
+                ON rc.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+                AND rc.RDB$RELATION_NAME = i.RDB$RELATION_NAME
+            WHERE i.RDB$RELATION_NAME = %s
+            ORDER BY i.RDB$INDEX_NAME, s.RDB$FIELD_POSITION
+        SQL, $this->quoteString($table));
+    }
+
+    /**
      * Compile the query to determine the columns.
      *
      * @param  string|null  $schema

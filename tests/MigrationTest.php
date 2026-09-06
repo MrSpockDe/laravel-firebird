@@ -1072,6 +1072,105 @@ class MigrationTest extends TestCase
         });
     }
 
+    #[Test]
+    #[DataProvider('introspectionIndexKinds')]
+    public function it_introspects_indexes(string $kind, array $expectedColumns, bool $unique, bool $primary)
+    {
+        Schema::dropIfExists('index_introspection_test');
+
+        try {
+            $this->createIndexIntrospectionTable('index_introspection_test', $kind);
+            $metadata = $this->readIndexIntrospectionMetadata('index_introspection_test');
+            $this->assertCount(count($expectedColumns), $metadata);
+            $this->assertSame($expectedColumns, array_column($metadata, 'column_name'));
+
+            $indexes = Schema::getIndexes('index_introspection_test');
+            $this->assertCount(1, $indexes);
+            $index = $indexes[0];
+            $this->assertIsArray($index);
+            foreach (['name', 'columns', 'type', 'unique', 'primary'] as $key) {
+                $this->assertArrayHasKey($key, $index);
+            }
+            $this->assertSame($metadata[0]->index_name, $index['name']);
+            $this->assertSame($expectedColumns, $index['columns']);
+            $this->assertSame($unique, $index['unique']);
+            $this->assertSame($primary, $index['primary']);
+        } finally {
+            Schema::dropIfExists('index_introspection_test');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('introspectionIndexKinds')]
+    public function it_introspects_index_existence(string $kind, array $expectedColumns, bool $unique, bool $primary)
+    {
+        Schema::dropIfExists('index_existence_test');
+
+        try {
+            $this->createIndexIntrospectionTable('index_existence_test', $kind);
+            $metadata = $this->readIndexIntrospectionMetadata('index_existence_test');
+            $this->assertNotEmpty($metadata);
+
+            $this->assertTrue(Schema::hasIndex('index_existence_test', $metadata[0]->index_name));
+            $this->assertTrue(Schema::hasIndex('index_existence_test', $expectedColumns));
+            $this->assertSame($unique, Schema::hasIndex('index_existence_test', $expectedColumns, 'unique'));
+            $this->assertSame($primary, Schema::hasIndex('index_existence_test', $expectedColumns, 'primary'));
+            $this->assertFalse(Schema::hasIndex('index_existence_test', 'nonexistent_index'));
+            $this->assertFalse(Schema::hasIndex('index_existence_test', ['nonexistent_column']));
+            if (count($expectedColumns) > 1) {
+                $this->assertFalse(Schema::hasIndex('index_existence_test', array_reverse($expectedColumns)));
+            }
+        } finally {
+            Schema::dropIfExists('index_existence_test');
+        }
+    }
+
+    public static function introspectionIndexKinds(): array
+    {
+        return [
+            'single column' => ['single', ['name'], false, false],
+            'composite' => ['composite', ['code', 'name'], false, false],
+            'unique' => ['unique', ['code'], true, false],
+            'primary key' => ['primary', ['id'], true, true],
+        ];
+    }
+
+    private function createIndexIntrospectionTable(string $table, string $kind): void
+    {
+        Schema::create($table, function (Blueprint $table) use ($kind) {
+            $table->integer('id');
+            $table->string('name');
+            $table->string('code');
+
+            match ($kind) {
+                'single' => $table->index('name', 'introspect_single_idx'),
+                'composite' => $table->index(['code', 'name'], 'introspect_composite_idx'),
+                'unique' => $table->unique('code', 'introspect_unique'),
+                'primary' => $table->primary('id'),
+            };
+        });
+    }
+
+    private function readIndexIntrospectionMetadata(string $table): array
+    {
+        return DB::select(<<<'SQL'
+            SELECT TRIM(i.RDB$INDEX_NAME) AS "index_name",
+                   TRIM(s.RDB$FIELD_NAME) AS "column_name",
+                   s.RDB$FIELD_POSITION AS "position",
+                   i.RDB$UNIQUE_FLAG AS "unique_flag",
+                   i.RDB$INDEX_TYPE AS "index_type",
+                   TRIM(rc.RDB$CONSTRAINT_NAME) AS "constraint_name",
+                   TRIM(rc.RDB$CONSTRAINT_TYPE) AS "constraint_type"
+            FROM RDB$INDICES i
+            JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+            LEFT JOIN RDB$RELATION_CONSTRAINTS rc
+                ON rc.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+                AND rc.RDB$RELATION_NAME = i.RDB$RELATION_NAME
+            WHERE i.RDB$RELATION_NAME = ?
+            ORDER BY i.RDB$INDEX_NAME, s.RDB$FIELD_POSITION
+        SQL, [$table]);
+    }
+
     public static function incrementTypes(): array
     {
         return [
