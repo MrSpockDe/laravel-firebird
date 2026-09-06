@@ -148,6 +148,35 @@ class FirebirdGrammar extends Grammar
     }
 
     /**
+     * Compile a change column command into a series of SQL statements.
+     *
+     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
+     * @param  \Illuminate\Support\Fluent  $command
+     * @return list<string>
+     */
+    public function compileChange(Blueprint $blueprint, Fluent $command)
+    {
+        $column = $command->column;
+        $sql = 'ALTER TABLE '.$this->wrapTable($blueprint).' ALTER COLUMN '.$this->wrap($column);
+
+        $statements = [
+            $sql.' TYPE '.$this->getType($column),
+        ];
+
+        if (array_key_exists('nullable', $column->getAttributes())) {
+            $statements[] = $sql.($column->nullable ? ' DROP NOT NULL' : ' SET NOT NULL');
+        }
+
+        if (array_key_exists('default', $column->getAttributes())) {
+            $statements[] = $sql.(is_null($column->default)
+                ? ' DROP DEFAULT'
+                : ' SET DEFAULT '.$this->getDefaultValue($column->default));
+        }
+
+        return $statements;
+    }
+
+    /**
      * Compile a drop column command.
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint

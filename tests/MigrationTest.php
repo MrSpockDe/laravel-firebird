@@ -350,6 +350,369 @@ class MigrationTest extends TestCase
         Schema::drop('increment_type_test');
     }
 
+    #[Test]
+    public function it_fails_explicitly_when_changing_a_blob_column_to_integer()
+    {
+        Schema::dropIfExists('change_incompatible_test');
+
+        try {
+            Schema::create('change_incompatible_test', function (Blueprint $table) {
+                $table->id();
+                $table->binary('value');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT f.RDB$FIELD_TYPE AS "field_type"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_incompatible_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            // Firebird field type 261 = BLOB.
+            $this->assertSame(261, $column->field_type);
+
+            try {
+                Schema::table('change_incompatible_test', function (Blueprint $table) {
+                    $table->integer('value')->change();
+                });
+
+                $this->fail('Changing a BLOB column to INTEGER should throw a QueryException.');
+            } catch (QueryException $exception) {
+                $this->assertInstanceOf(QueryException::class, $exception);
+            }
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(261, $column->field_type);
+        } finally {
+            Schema::dropIfExists('change_incompatible_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_type()
+    {
+        Schema::dropIfExists('change_type_test');
+
+        try {
+            Schema::create('change_type_test', function (Blueprint $table) {
+                $table->id();
+                $table->integer('value');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT f.RDB$FIELD_TYPE AS "field_type"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_type_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(8, $column->field_type);
+
+            Schema::table('change_type_test', function (Blueprint $table) {
+                $table->bigInteger('value')->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(16, $column->field_type);
+        } finally {
+            Schema::dropIfExists('change_type_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_length()
+    {
+        Schema::dropIfExists('change_length_test');
+
+        try {
+            Schema::create('change_length_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value', 40);
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT f.RDB$CHARACTER_LENGTH AS "character_length"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_length_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(40, $column->character_length);
+
+            Schema::table('change_length_test', function (Blueprint $table) {
+                $table->string('value', 100)->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(100, $column->character_length);
+        } finally {
+            Schema::dropIfExists('change_length_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_length_without_removing_nullable()
+    {
+        Schema::dropIfExists('change_preserve_nullable_test');
+
+        try {
+            Schema::create('change_preserve_nullable_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value', 40)->nullable();
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT f.RDB$CHARACTER_LENGTH AS "character_length",
+                       COALESCE(rf.RDB$NULL_FLAG, 0) AS "null_flag"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_preserve_nullable_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(40, $column->character_length);
+            $this->assertSame(0, $column->null_flag);
+
+            Schema::table('change_preserve_nullable_test', function (Blueprint $table) {
+                $table->string('value', 100)->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(100, $column->character_length);
+            $this->assertSame(0, $column->null_flag);
+        } finally {
+            Schema::dropIfExists('change_preserve_nullable_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_length_without_removing_its_default()
+    {
+        Schema::dropIfExists('change_preserve_default_test');
+
+        try {
+            Schema::create('change_preserve_default_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value', 40)->nullable()->default('original');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT f.RDB$CHARACTER_LENGTH AS "character_length",
+                       TRIM(CAST(rf.RDB$DEFAULT_SOURCE AS VARCHAR(255))) AS "default_source"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_preserve_default_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(40, $column->character_length);
+            $this->assertSame("DEFAULT 'original'", $column->default_source);
+
+            Schema::table('change_preserve_default_test', function (Blueprint $table) {
+                $table->string('value', 100)->nullable()->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(100, $column->character_length);
+            $this->assertSame("DEFAULT 'original'", $column->default_source);
+        } finally {
+            Schema::dropIfExists('change_preserve_default_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_to_nullable()
+    {
+        Schema::dropIfExists('change_nullable_test');
+
+        try {
+            Schema::create('change_nullable_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value');
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT COALESCE(rf.RDB$NULL_FLAG, 0) AS "null_flag"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_nullable_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(1, $column->null_flag);
+
+            Schema::table('change_nullable_test', function (Blueprint $table) {
+                $table->string('value')->nullable()->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(0, $column->null_flag);
+        } finally {
+            Schema::dropIfExists('change_nullable_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_to_not_nullable()
+    {
+        Schema::dropIfExists('change_not_nullable_test');
+
+        try {
+            Schema::create('change_not_nullable_test', function (Blueprint $table) {
+                $table->id();
+                $table->string('value')->nullable();
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT COALESCE(rf.RDB$NULL_FLAG, 0) AS "null_flag"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_not_nullable_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(0, $column->null_flag);
+
+            Schema::table('change_not_nullable_test', function (Blueprint $table) {
+                $table->string('value')->nullable(false)->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(1, $column->null_flag);
+        } finally {
+            Schema::dropIfExists('change_not_nullable_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_to_set_a_default()
+    {
+        Schema::dropIfExists('change_set_default_test');
+
+        try {
+            Schema::create('change_set_default_test', function (Blueprint $table) {
+                $table->id();
+                $table->integer('value')->nullable();
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT TRIM(CAST(rf.RDB$DEFAULT_SOURCE AS VARCHAR(255))) AS "default_source"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_set_default_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(null, $column->default_source);
+
+            Schema::table('change_set_default_test', function (Blueprint $table) {
+                $table->integer('value')->nullable()->default(10)->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame("DEFAULT '10'", $column->default_source);
+        } finally {
+            Schema::dropIfExists('change_set_default_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_to_update_a_default()
+    {
+        Schema::dropIfExists('change_update_default_test');
+
+        try {
+            Schema::create('change_update_default_test', function (Blueprint $table) {
+                $table->id();
+                $table->integer('value')->nullable()->default(10);
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT TRIM(CAST(rf.RDB$DEFAULT_SOURCE AS VARCHAR(255))) AS "default_source"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_update_default_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame("DEFAULT '10'", $column->default_source);
+
+            Schema::table('change_update_default_test', function (Blueprint $table) {
+                $table->integer('value')->nullable()->default(20)->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame("DEFAULT '20'", $column->default_source);
+        } finally {
+            Schema::dropIfExists('change_update_default_test');
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_column_to_remove_a_default()
+    {
+        Schema::dropIfExists('change_remove_default_test');
+
+        try {
+            Schema::create('change_remove_default_test', function (Blueprint $table) {
+                $table->id();
+                $table->integer('value')->nullable()->default(10);
+            });
+
+            $metadataSql = <<<'SQL'
+                SELECT TRIM(CAST(rf.RDB$DEFAULT_SOURCE AS VARCHAR(255))) AS "default_source"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'change_remove_default_test'
+                  AND rf.RDB$FIELD_NAME = 'value'
+            SQL;
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame("DEFAULT '10'", $column->default_source);
+
+            Schema::table('change_remove_default_test', function (Blueprint $table) {
+                $table->integer('value')->nullable()->default(null)->change();
+            });
+
+            $column = DB::selectOne($metadataSql);
+            $this->assertNotNull($column);
+            $this->assertSame(null, $column->default_source);
+        } finally {
+            Schema::dropIfExists('change_remove_default_test');
+        }
+    }
+
     public static function incrementTypes(): array
     {
         return [
