@@ -63,12 +63,67 @@ class FirebirdGrammar extends Grammar
      */
     public function compileColumns($schema, $table)
     {
-        return sprintf(
-            'select trim(trailing from rdb$field_name) as "name" '
-            .'from rdb$relation_fields where rdb$relation_name = %s '
-            .'order by rdb$field_position',
-            $this->quoteString($table),
-        );
+        return sprintf(<<<'SQL'
+            WITH columns_metadata AS (
+                SELECT
+                    TRIM(TRAILING FROM rf.RDB$FIELD_NAME) AS "name",
+                    TRIM(CASE
+                        WHEN f.RDB$FIELD_TYPE IN (7, 8, 16, 26) AND f.RDB$FIELD_SUB_TYPE = 1 THEN 'numeric'
+                        WHEN f.RDB$FIELD_TYPE IN (7, 8, 16, 26) AND f.RDB$FIELD_SUB_TYPE = 2 THEN 'decimal'
+                        ELSE CASE f.RDB$FIELD_TYPE
+                            WHEN 7 THEN 'smallint'
+                            WHEN 8 THEN 'integer'
+                            WHEN 10 THEN 'float'
+                            WHEN 12 THEN 'date'
+                            WHEN 13 THEN 'time'
+                            WHEN 14 THEN 'char'
+                            WHEN 16 THEN 'bigint'
+                            WHEN 23 THEN 'boolean'
+                            WHEN 24 THEN 'decfloat'
+                            WHEN 25 THEN 'decfloat'
+                            WHEN 26 THEN 'int128'
+                            WHEN 27 THEN 'double precision'
+                            WHEN 28 THEN 'time with time zone'
+                            WHEN 29 THEN 'timestamp with time zone'
+                            WHEN 35 THEN 'timestamp'
+                            WHEN 37 THEN 'varchar'
+                            WHEN 261 THEN 'blob'
+                        END
+                    END) AS "type_name",
+                    f.RDB$FIELD_TYPE AS field_type,
+                    f.RDB$FIELD_SUB_TYPE AS field_sub_type,
+                    f.RDB$CHARACTER_LENGTH AS char_length_value,
+                    f.RDB$FIELD_PRECISION AS field_precision,
+                    f.RDB$FIELD_SCALE AS field_scale,
+                    TRIM(TRAILING FROM c.RDB$COLLATION_NAME) AS "collation",
+                    CASE WHEN COALESCE(rf.RDB$NULL_FLAG, 0) = 1 OR COALESCE(f.RDB$NULL_FLAG, 0) = 1
+                        THEN FALSE ELSE TRUE END AS "nullable",
+                    TRIM(SUBSTRING(TRIM(COALESCE(rf.RDB$DEFAULT_SOURCE, f.RDB$DEFAULT_SOURCE)) FROM 8)) AS "default",
+                    CASE WHEN rf.RDB$IDENTITY_TYPE IS NOT NULL THEN TRUE ELSE FALSE END AS "auto_increment",
+                    rf.RDB$DESCRIPTION AS "comment",
+                    f.RDB$COMPUTED_SOURCE AS "generation",
+                    rf.RDB$FIELD_POSITION AS field_position
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                LEFT JOIN RDB$COLLATIONS c
+                    ON c.RDB$CHARACTER_SET_ID = f.RDB$CHARACTER_SET_ID
+                    AND c.RDB$COLLATION_ID = COALESCE(rf.RDB$COLLATION_ID, f.RDB$COLLATION_ID)
+                WHERE rf.RDB$RELATION_NAME = %s
+            )
+            SELECT "name", "type_name",
+                CASE
+                    WHEN "type_name" IN ('numeric', 'decimal') THEN
+                        "type_name" || '(' || field_precision || ',' || (-field_scale) || ')'
+                    WHEN field_type IN (14, 37) THEN "type_name" || '(' || char_length_value || ')'
+                    WHEN field_type = 24 THEN 'decfloat(16)'
+                    WHEN field_type = 25 THEN 'decfloat(34)'
+                    WHEN field_type = 261 THEN 'blob sub_type ' || COALESCE(field_sub_type, 0)
+                    ELSE "type_name"
+                END AS "type",
+                "collation", "nullable", "default", "auto_increment", "comment", "generation"
+            FROM columns_metadata
+            ORDER BY field_position
+        SQL, $this->quoteString($table));
     }
 
     /**

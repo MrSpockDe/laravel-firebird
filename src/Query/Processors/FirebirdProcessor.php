@@ -7,6 +7,29 @@ use Illuminate\Database\Query\Processors\Processor;
 
 class FirebirdProcessor extends Processor
 {
+    /** @inheritDoc */
+    public function processColumns($results)
+    {
+        return array_map(function ($result) {
+            $result = (object) $result;
+
+            return [
+                'name' => $result->name,
+                'type_name' => $result->type_name,
+                'type' => $result->type,
+                'collation' => $result->collation,
+                'nullable' => (bool) $result->nullable,
+                'default' => $result->default,
+                'auto_increment' => (bool) $result->auto_increment,
+                'comment' => $result->comment,
+                'generation' => $result->generation !== null ? [
+                    'type' => 'virtual',
+                    'expression' => $result->generation,
+                ] : null,
+            ];
+        }, $results);
+    }
+
     /**
      * Process an "insert get ID" query.
      *
