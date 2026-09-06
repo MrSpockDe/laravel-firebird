@@ -928,6 +928,150 @@ class MigrationTest extends TestCase
         }
     }
 
+    #[Test]
+    public function it_introspects_a_computed_column()
+    {
+        Schema::dropIfExists('computed_column_test');
+
+        try {
+            DB::statement(<<<'SQL'
+                CREATE TABLE "computed_column_test" (
+                    "quantity" INTEGER NOT NULL,
+                    "price" INTEGER NOT NULL,
+                    "total" BIGINT COMPUTED BY ("quantity" * "price")
+                )
+            SQL);
+
+            $columns = array_column(Schema::getColumns('computed_column_test'), null, 'name');
+            $this->assertArrayHasKey('total', $columns);
+            $column = $columns['total'];
+
+            $this->assertSame('total', $column['name']);
+            $this->assertSame('bigint', $column['type_name']);
+            $this->assertSame('bigint', $column['type']);
+            $this->assertTrue($column['nullable']);
+            $this->assertFalse($column['auto_increment']);
+            $this->assertNotNull($column['generation']);
+            $this->assertIsArray($column['generation']);
+            $this->assertSame('virtual', $column['generation']['type']);
+            $this->assertIsString($column['generation']['expression']);
+            $this->assertStringContainsString('"quantity" * "price"', $column['generation']['expression']);
+
+            $metadata = DB::selectOne(<<<'SQL'
+                SELECT f.RDB$COMPUTED_SOURCE AS "expression",
+                       COALESCE(rf.RDB$NULL_FLAG, 0) AS "null_flag"
+                FROM RDB$RELATION_FIELDS rf
+                JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+                WHERE rf.RDB$RELATION_NAME = 'computed_column_test'
+                  AND rf.RDB$FIELD_NAME = 'total'
+            SQL);
+
+            $this->assertNotNull($metadata);
+            $this->assertSame($metadata->expression, $column['generation']['expression']);
+            $this->assertSame(0, $metadata->null_flag);
+            $this->assertSame('bigint', Schema::getColumnType('computed_column_test', 'total'));
+            $this->assertSame('bigint', Schema::getColumnType('computed_column_test', 'total', true));
+        } finally {
+            Schema::dropIfExists('computed_column_test');
+        }
+    }
+
+    #[Test]
+    public function it_introspects_column_metadata()
+    {
+        Schema::dropIfExists('column_introspection_test');
+
+        try {
+            $this->createColumnIntrospectionTable('column_introspection_test');
+
+            $columns = Schema::getColumns('column_introspection_test');
+            $this->assertSame(
+                ['id', 'name', 'quantity', 'notes', 'status', 'body', 'recorded_at'],
+                array_column($columns, 'name'),
+            );
+
+            foreach ($columns as $column) {
+                $this->assertIsArray($column);
+                foreach (['name', 'type_name', 'type', 'collation', 'nullable', 'default', 'auto_increment', 'comment', 'generation'] as $key) {
+                    $this->assertArrayHasKey($key, $column, "Missing {$key} for {$column['name']}");
+                }
+
+                $this->assertIsString($column['type_name']);
+                $this->assertNotSame('', $column['type_name']);
+                $this->assertIsString($column['type']);
+                $this->assertNotSame('', $column['type']);
+                $this->assertSame(in_array($column['name'], ['notes', 'status'], true), $column['nullable']);
+                $this->assertSame($column['name'] === 'id', $column['auto_increment']);
+                // Identity is reported via auto_increment; none of these columns is computed.
+                $this->assertNull($column['generation']);
+
+                if ($column['name'] === 'status') {
+                    $this->assertSame("'pending'", $column['default']);
+                } else {
+                    $this->assertNull($column['default']);
+                }
+            }
+
+            $byName = array_column($columns, null, 'name');
+            foreach (self::introspectionColumnTypes() as [$name, $type]) {
+                $this->assertSame($type, strtolower($byName[$name]['type_name']));
+            }
+            $this->assertSame('varchar(40)', strtolower($byName['name']['type']));
+        } finally {
+            Schema::dropIfExists('column_introspection_test');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('introspectionColumnTypes')]
+    public function it_introspects_column_type(string $column, string $expectedType)
+    {
+        Schema::dropIfExists('column_type_test');
+
+        try {
+            $this->createColumnIntrospectionTable('column_type_test');
+
+            $type = Schema::getColumnType('column_type_test', $column);
+            $this->assertIsString($type);
+            $this->assertSame($expectedType, strtolower($type));
+
+            $fullType = Schema::getColumnType('column_type_test', $column, true);
+            $this->assertIsString($fullType);
+            $this->assertNotSame('', $fullType);
+            if ($column === 'name') {
+                $this->assertSame('varchar(40)', strtolower($fullType));
+            }
+        } finally {
+            Schema::dropIfExists('column_type_test');
+        }
+    }
+
+    public static function introspectionColumnTypes(): array
+    {
+        return [
+            'identity' => ['id', 'bigint'],
+            'string' => ['name', 'varchar'],
+            'integer' => ['quantity', 'integer'],
+            'nullable' => ['notes', 'varchar'],
+            'default' => ['status', 'varchar'],
+            'text blob' => ['body', 'blob'],
+            'timestamp' => ['recorded_at', 'timestamp'],
+        ];
+    }
+
+    private function createColumnIntrospectionTable(string $table): void
+    {
+        Schema::create($table, function (Blueprint $table) {
+            $table->id();
+            $table->string('name', 40);
+            $table->integer('quantity');
+            $table->string('notes')->nullable();
+            $table->string('status')->nullable()->default('pending');
+            $table->text('body');
+            $table->timestamp('recorded_at');
+        });
+    }
+
     public static function incrementTypes(): array
     {
         return [
