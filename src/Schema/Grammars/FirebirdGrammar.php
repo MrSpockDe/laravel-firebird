@@ -148,6 +148,33 @@ class FirebirdGrammar extends Grammar
     }
 
     /**
+     * Compile a drop column command.
+     *
+     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
+     * @param  \Illuminate\Support\Fluent  $command
+     * @return string
+     */
+    public function compileDropColumn(Blueprint $blueprint, Fluent $command)
+    {
+        $columns = $this->prefixArray('DROP', $this->wrapArray($command->columns));
+
+        return 'ALTER TABLE '.$this->wrapTable($blueprint).' '.implode(', ', $columns);
+    }
+
+    /**
+     * Compile a rename column command.
+     *
+     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
+     * @param  \Illuminate\Support\Fluent  $command
+     * @return string
+     */
+    public function compileRenameColumn(Blueprint $blueprint, Fluent $command)
+    {
+        return 'ALTER TABLE '.$this->wrapTable($blueprint)
+            .' ALTER COLUMN '.$this->wrap($command->from).' TO '.$this->wrap($command->to);
+    }
+
+    /**
      * Compile a primary key command.
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
