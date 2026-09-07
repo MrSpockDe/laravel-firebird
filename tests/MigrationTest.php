@@ -1171,6 +1171,136 @@ class MigrationTest extends TestCase
         SQL, [$table]);
     }
 
+    #[Test]
+    #[DataProvider('introspectionForeignKeyKinds')]
+    public function it_introspects_foreign_keys(string $kind, array $columns, array $foreignColumns)
+    {
+        try {
+            $this->createForeignKeyIntrospectionTables($kind);
+            $metadata = $this->readForeignKeyIntrospectionMetadata();
+            $this->assertCount(count($columns), $metadata);
+            $this->assertSame($columns, array_column($metadata, 'column_name'));
+            $this->assertSame($foreignColumns, array_column($metadata, 'foreign_column'));
+
+            $foreignKeys = Schema::getForeignKeys('fk_intro_child');
+            $this->assertCount(1, $foreignKeys);
+            $foreignKey = $foreignKeys[0];
+            $this->assertIsArray($foreignKey);
+            foreach (['name', 'columns', 'foreign_schema', 'foreign_table', 'foreign_columns', 'on_update', 'on_delete'] as $key) {
+                $this->assertArrayHasKey($key, $foreignKey);
+            }
+            $this->assertSame($metadata[0]->constraint_name, $foreignKey['name']);
+            $this->assertSame($columns, $foreignKey['columns']);
+            $this->assertNull($foreignKey['foreign_schema']);
+            $this->assertSame('fk_intro_parent', $foreignKey['foreign_table']);
+            $this->assertSame($foreignColumns, $foreignKey['foreign_columns']);
+            $this->assertSame(strtolower($metadata[0]->update_rule), $foreignKey['on_update']);
+            $this->assertSame(strtolower($metadata[0]->delete_rule), $foreignKey['on_delete']);
+            if ($kind === 'delete_cascade') {
+                $this->assertSame('cascade', $foreignKey['on_delete']);
+            }
+            if ($kind === 'update_cascade') {
+                $this->assertSame('cascade', $foreignKey['on_update']);
+            }
+        } finally {
+            Schema::dropIfExists('fk_intro_child');
+            Schema::dropIfExists('fk_intro_parent');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('introspectionForeignKeyKinds')]
+    public function it_introspects_foreign_key_existence(string $kind, array $columns, array $foreignColumns)
+    {
+        if (! method_exists(Schema::getFacadeRoot(), 'hasForeignKey')) {
+            $this->markTestSkipped('This Laravel version does not support Schema::hasForeignKey().');
+        }
+
+        try {
+            $this->createForeignKeyIntrospectionTables($kind);
+            $metadata = $this->readForeignKeyIntrospectionMetadata();
+            $this->assertNotEmpty($metadata);
+
+            $this->assertTrue(Schema::hasForeignKey('fk_intro_child', $metadata[0]->constraint_name));
+            $this->assertTrue(Schema::hasForeignKey('fk_intro_child', $columns));
+            $this->assertFalse(Schema::hasForeignKey('fk_intro_child', 'nonexistent_foreign_key'));
+            $this->assertFalse(Schema::hasForeignKey('fk_intro_child', ['nonexistent_column']));
+            if (count($columns) > 1) {
+                $this->assertFalse(Schema::hasForeignKey('fk_intro_child', array_reverse($columns)));
+            }
+        } finally {
+            Schema::dropIfExists('fk_intro_child');
+            Schema::dropIfExists('fk_intro_parent');
+        }
+    }
+
+    public static function introspectionForeignKeyKinds(): array
+    {
+        return [
+            'simple' => ['simple', ['ref_a'], ['key_a']],
+            'delete cascade' => ['delete_cascade', ['ref_a'], ['key_a']],
+            'update cascade' => ['update_cascade', ['ref_a'], ['key_a']],
+            'composite' => ['composite', ['ref_b', 'ref_a'], ['key_b', 'key_a']],
+        ];
+    }
+
+    private function createForeignKeyIntrospectionTables(string $kind): void
+    {
+        Schema::dropIfExists('fk_intro_child');
+        Schema::dropIfExists('fk_intro_parent');
+
+        Schema::create('fk_intro_parent', function (Blueprint $table) use ($kind) {
+            $table->integer('key_a');
+            $table->integer('key_b');
+            $table->primary($kind === 'composite' ? ['key_b', 'key_a'] : ['key_a']);
+        });
+        Schema::create('fk_intro_child', function (Blueprint $table) use ($kind) {
+            $table->integer('ref_a');
+            $table->integer('ref_b');
+            $foreignKey = $table->foreign(
+                $kind === 'composite' ? ['ref_b', 'ref_a'] : ['ref_a'],
+                'fk_intro_reference',
+            )->references($kind === 'composite' ? ['key_b', 'key_a'] : ['key_a'])
+                ->on('fk_intro_parent');
+
+            if ($kind === 'delete_cascade') {
+                $foreignKey->onDelete('cascade');
+            }
+            if ($kind === 'update_cascade') {
+                $foreignKey->onUpdate('cascade');
+            }
+        });
+    }
+
+    private function readForeignKeyIntrospectionMetadata(): array
+    {
+        return DB::select(<<<'SQL'
+            SELECT TRIM(rc.RDB$CONSTRAINT_NAME) AS "constraint_name",
+                   TRIM(rc.RDB$CONSTRAINT_TYPE) AS "constraint_type",
+                   TRIM(i.RDB$INDEX_NAME) AS "index_name",
+                   TRIM(i.RDB$FOREIGN_KEY) AS "referenced_index",
+                   TRIM(s.RDB$FIELD_NAME) AS "column_name",
+                   s.RDB$FIELD_POSITION AS "position",
+                   TRIM(parent.RDB$CONSTRAINT_NAME) AS "referenced_constraint",
+                   TRIM(parent.RDB$RELATION_NAME) AS "foreign_table",
+                   TRIM(fs.RDB$FIELD_NAME) AS "foreign_column",
+                   fs.RDB$FIELD_POSITION AS "foreign_position",
+                   TRIM(ref.RDB$UPDATE_RULE) AS "update_rule",
+                   TRIM(ref.RDB$DELETE_RULE) AS "delete_rule"
+            FROM RDB$RELATION_CONSTRAINTS rc
+            JOIN RDB$REF_CONSTRAINTS ref ON ref.RDB$CONSTRAINT_NAME = rc.RDB$CONSTRAINT_NAME
+            JOIN RDB$INDICES i ON i.RDB$INDEX_NAME = rc.RDB$INDEX_NAME
+            JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+            JOIN RDB$RELATION_CONSTRAINTS parent ON parent.RDB$CONSTRAINT_NAME = ref.RDB$CONST_NAME_UQ
+            JOIN RDB$INDEX_SEGMENTS fs
+                ON fs.RDB$INDEX_NAME = parent.RDB$INDEX_NAME
+                AND fs.RDB$FIELD_POSITION = s.RDB$FIELD_POSITION
+            WHERE rc.RDB$RELATION_NAME = 'fk_intro_child'
+              AND rc.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'
+            ORDER BY rc.RDB$CONSTRAINT_NAME, s.RDB$FIELD_POSITION
+        SQL);
+    }
+
     public static function incrementTypes(): array
     {
         return [

@@ -54,6 +54,31 @@ class FirebirdProcessor extends Processor
         return array_values($indexes);
     }
 
+    /** @inheritDoc */
+    public function processForeignKeys($results)
+    {
+        $foreignKeys = [];
+
+        foreach ($results as $result) {
+            $result = (object) $result;
+
+            $foreignKeys[$result->name] ??= [
+                'name' => $result->name,
+                'columns' => [],
+                'foreign_schema' => null,
+                'foreign_table' => $result->foreign_table,
+                'foreign_columns' => [],
+                'on_update' => $result->on_update,
+                'on_delete' => $result->on_delete,
+            ];
+
+            $foreignKeys[$result->name]['columns'][] = $result->column_name;
+            $foreignKeys[$result->name]['foreign_columns'][] = $result->foreign_column;
+        }
+
+        return array_values($foreignKeys);
+    }
+
     /**
      * Process an "insert get ID" query.
      *

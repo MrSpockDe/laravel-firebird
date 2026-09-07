@@ -80,6 +80,36 @@ class FirebirdGrammar extends Grammar
     }
 
     /**
+     * Compile the query to determine foreign keys and their ordered column pairs.
+     *
+     * @param  string|null  $schema
+     * @param  string  $table
+     * @return string
+     */
+    public function compileForeignKeys($schema, $table)
+    {
+        return sprintf(<<<'SQL'
+            SELECT TRIM(TRAILING FROM rc.RDB$CONSTRAINT_NAME) AS "name",
+                   TRIM(TRAILING FROM s.RDB$FIELD_NAME) AS "column_name",
+                   TRIM(TRAILING FROM parent.RDB$RELATION_NAME) AS "foreign_table",
+                   TRIM(TRAILING FROM fs.RDB$FIELD_NAME) AS "foreign_column",
+                   LOWER(TRIM(ref.RDB$UPDATE_RULE)) AS "on_update",
+                   LOWER(TRIM(ref.RDB$DELETE_RULE)) AS "on_delete"
+            FROM RDB$RELATION_CONSTRAINTS rc
+            JOIN RDB$REF_CONSTRAINTS ref ON ref.RDB$CONSTRAINT_NAME = rc.RDB$CONSTRAINT_NAME
+            JOIN RDB$INDICES i ON i.RDB$INDEX_NAME = rc.RDB$INDEX_NAME
+            JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = i.RDB$INDEX_NAME
+            JOIN RDB$RELATION_CONSTRAINTS parent ON parent.RDB$CONSTRAINT_NAME = ref.RDB$CONST_NAME_UQ
+            JOIN RDB$INDEX_SEGMENTS fs
+                ON fs.RDB$INDEX_NAME = parent.RDB$INDEX_NAME
+                AND fs.RDB$FIELD_POSITION = s.RDB$FIELD_POSITION
+            WHERE rc.RDB$RELATION_NAME = %s
+              AND rc.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'
+            ORDER BY rc.RDB$CONSTRAINT_NAME, s.RDB$FIELD_POSITION
+        SQL, $this->quoteString($table));
+    }
+
+    /**
      * Compile the query to determine the columns.
      *
      * @param  string|null  $schema
