@@ -196,7 +196,9 @@ class MigrationTest extends TestCase
             DB::table($table)->insert($values);
             $this->fail('Firebird must reject a child row without a matching parent key.');
         } catch (QueryException $exception) {
-            $this->assertSame('23000', $exception->errorInfo[0]);
+            // Firebird SQLCODE -530 identifies a foreign-key violation;
+            // PDO may report it with either SQLSTATE 23000 or HY000.
+            $this->assertSame(-530, $exception->errorInfo[1]);
         }
         $this->assertSame($before, DB::table($table)->count());
     }
