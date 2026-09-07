@@ -749,8 +749,7 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeDateTimeTz(Fluent $column)
     {
-        // No timezone support, default to plain date time
-        return $this->typeDateTime($column);
+        return 'TIMESTAMP WITH TIME ZONE';
     }
 
     /**
@@ -772,8 +771,7 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeTimeTz(Fluent $column)
     {
-        // No timezone support, default to plain time
-        return $this->typeTime($column);
+        return 'TIME WITH TIME ZONE';
     }
 
     /**
@@ -799,8 +797,11 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeTimestampTz(Fluent $column)
     {
-        // No timezone support, default to plain timestamp
-        return $this->typeTimestamp($column);
+        if ($column->useCurrent) {
+            return 'TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP';
+        }
+
+        return 'TIMESTAMP WITH TIME ZONE';
     }
 
     /**

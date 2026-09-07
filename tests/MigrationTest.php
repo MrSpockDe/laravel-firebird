@@ -1301,6 +1301,141 @@ class MigrationTest extends TestCase
         SQL);
     }
 
+    #[Test]
+    #[DataProvider('timeZoneColumnDefinitions')]
+    public function it_supports_time_zone_column_metadata(string $method, int $fieldType, string $type, bool $nullable, ?int $precision)
+    {
+        Schema::dropIfExists('tz_column_test');
+
+        try {
+            Schema::create('tz_column_test', function (Blueprint $table) use ($method, $nullable, $precision) {
+                $table->{$method}('value', $precision)->nullable($nullable);
+            });
+
+            $metadata = $this->readTimeZoneColumnMetadata('tz_column_test');
+            $this->assertCount(1, $metadata);
+            $this->assertSame($nullable ? 0 : 1, $metadata[0]->null_flag);
+            $this->assertSame($fieldType, $metadata[0]->field_type);
+
+            $columns = Schema::getColumns('tz_column_test');
+            $this->assertCount(1, $columns);
+            $this->assertSame('value', $columns[0]['name']);
+            $this->assertSame($type, $columns[0]['type_name']);
+            $this->assertSame($type, $columns[0]['type']);
+            $this->assertSame($nullable, $columns[0]['nullable']);
+            $this->assertSame($type, Schema::getColumnType('tz_column_test', 'value'));
+            $this->assertSame($type, Schema::getColumnType('tz_column_test', 'value', true));
+        } finally {
+            Schema::dropIfExists('tz_column_test');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('timeZonePrecisions')]
+    public function it_supports_time_zone_timestamps(?int $precision)
+    {
+        Schema::dropIfExists('tz_timestamps_test');
+
+        try {
+            Schema::create('tz_timestamps_test', function (Blueprint $table) use ($precision) {
+                $table->timestampsTz($precision);
+            });
+
+            $metadata = $this->readTimeZoneColumnMetadata('tz_timestamps_test');
+            $this->assertSame(['created_at', 'updated_at'], array_column($metadata, 'name'));
+            foreach ($metadata as $column) {
+                $this->assertSame(29, $column->field_type);
+                $this->assertSame(0, $column->null_flag);
+            }
+            foreach (Schema::getColumns('tz_timestamps_test') as $column) {
+                $this->assertTrue($column['nullable']);
+                $this->assertSame('timestamp with time zone', $column['type_name']);
+                $this->assertSame('timestamp with time zone', $column['type']);
+                $this->assertSame('timestamp with time zone', Schema::getColumnType('tz_timestamps_test', $column['name']));
+                $this->assertSame('timestamp with time zone', Schema::getColumnType('tz_timestamps_test', $column['name'], true));
+            }
+        } finally {
+            Schema::dropIfExists('tz_timestamps_test');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('timeZoneRoundTripValues')]
+    public function it_supports_time_zone_query_builder_round_trip(string $method, string $sqlType, string $input, string $utcEquivalent)
+    {
+        Schema::dropIfExists('tz_round_trip_test');
+
+        try {
+            Schema::create('tz_round_trip_test', function (Blueprint $table) use ($method) {
+                $table->integer('id');
+                $table->{$method}('value', 4);
+            });
+
+            DB::table('tz_round_trip_test')->insert(['id' => 1, 'value' => $input]);
+            $row = DB::table('tz_round_trip_test')->where('id', 1)->first();
+            $this->assertNotNull($row);
+            $this->assertNotNull($row->value);
+
+            // Compare UTC semantics in Firebird, without requiring identical offset text from PDO.
+            $comparison = DB::table('tz_round_trip_test')->where('id', 1)
+                ->selectRaw('CASE WHEN "value" = CAST(? AS '.$sqlType.') THEN 1 ELSE 0 END AS "same_value"', [$utcEquivalent])
+                ->selectRaw('EXTRACT(SECOND FROM "value") AS "seconds"')
+                ->first();
+            $this->assertSame(1, $comparison->same_value);
+            // Firebird stores fractions at a fixed resolution of four decimal places.
+            $this->assertEqualsWithDelta(56.1234, (float) $comparison->seconds, 0.00001);
+            $this->assertSame(strtolower($sqlType), Schema::getColumnType('tz_round_trip_test', 'value'));
+        } finally {
+            Schema::dropIfExists('tz_round_trip_test');
+        }
+    }
+
+    public static function timeZonePrecisions(): array
+    {
+        return ['default precision' => [null], 'four fractional digits' => [4]];
+    }
+
+    public static function timeZoneColumnDefinitions(): array
+    {
+        $cases = [];
+        foreach (['timeTz' => [28, 'time with time zone'], 'timestampTz' => [29, 'timestamp with time zone'], 'dateTimeTz' => [29, 'timestamp with time zone']] as $method => [$fieldType, $type]) {
+            foreach ([false, true] as $nullable) {
+                foreach ([null, 4] as $precision) {
+                    $label = $method.($nullable ? ' nullable' : ' not null').' precision '.($precision ?? 'default');
+                    $cases[$label] = [$method, $fieldType, $type, $nullable, $precision];
+                }
+            }
+        }
+
+        return $cases;
+    }
+
+    public static function timeZoneRoundTripValues(): array
+    {
+        return [
+            'timeTz' => ['timeTz', 'TIME WITH TIME ZONE', '12:34:56.1234 +02:00', '10:34:56.1234 +00:00'],
+            'timestampTz' => ['timestampTz', 'TIMESTAMP WITH TIME ZONE', '2026-01-15 12:34:56.1234 +02:00', '2026-01-15 10:34:56.1234 +00:00'],
+            'dateTimeTz' => ['dateTimeTz', 'TIMESTAMP WITH TIME ZONE', '2026-01-15 12:34:56.1234 +02:00', '2026-01-15 10:34:56.1234 +00:00'],
+        ];
+    }
+
+    private function readTimeZoneColumnMetadata(string $table): array
+    {
+        return DB::select(<<<'SQL'
+            SELECT TRIM(rf.RDB$FIELD_NAME) AS "name",
+                   f.RDB$FIELD_TYPE AS "field_type",
+                   f.RDB$FIELD_SUB_TYPE AS "field_sub_type",
+                   f.RDB$FIELD_PRECISION AS "field_precision",
+                   f.RDB$FIELD_SCALE AS "field_scale",
+                   f.RDB$FIELD_LENGTH AS "field_length",
+                   COALESCE(rf.RDB$NULL_FLAG, 0) AS "null_flag"
+            FROM RDB$RELATION_FIELDS rf
+            JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+            WHERE rf.RDB$RELATION_NAME = ?
+            ORDER BY rf.RDB$FIELD_POSITION
+        SQL, [$table]);
+    }
+
     public static function incrementTypes(): array
     {
         return [
