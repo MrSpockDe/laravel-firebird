@@ -13,6 +13,224 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    public function it_adds_and_drops_a_column_without_losing_existing_data()
+    {
+        $this->assertAddedColumnLifecycle(false);
+    }
+
+    #[Test]
+    public function it_adds_and_drops_multiple_columns_without_losing_existing_data()
+    {
+        $this->assertAddedColumnLifecycle(true);
+    }
+
+    private function assertAddedColumnLifecycle(bool $multiple): void
+    {
+        $name = $multiple ? 'add_many_lifecycle_test' : 'add_one_lifecycle_test';
+
+        try {
+            Schema::dropIfExists($name);
+            Schema::create($name, function (Blueprint $table) {
+                $table->integer('id');
+                $table->string('name', 40);
+            });
+            DB::table($name)->insert(['id' => 1, 'name' => 'Original']);
+            $before = $this->readLifecycleColumnMetadata($name);
+
+            Schema::table($name, function (Blueprint $table) use ($multiple) {
+                $table->string('note', 60)->nullable()->default('pending');
+                if ($multiple) {
+                    $table->integer('quantity')->default(7);
+                }
+            });
+
+            $columns = $this->readLifecycleColumnMetadata($name);
+            $this->assertSame($multiple ? ['id', 'name', 'note', 'quantity'] : ['id', 'name', 'note'], array_column($columns, 'name'));
+            $this->assertSame($before, array_slice($columns, 0, 2));
+            $this->assertSame(37, $columns[2]['field_type']);
+            $this->assertSame(60, $columns[2]['length']);
+            $this->assertSame(0, $columns[2]['null_flag']);
+            $this->assertSame("DEFAULT 'pending'", $columns[2]['default_source']);
+            if ($multiple) {
+                $this->assertSame(8, $columns[3]['field_type']);
+                $this->assertSame(1, $columns[3]['null_flag']);
+            }
+            $this->assertSame('Original', DB::table($name)->where('id', 1)->value('name'));
+            $this->assertSame(1, DB::table($name)->count());
+            DB::table($name)->insert(['id' => 2, 'name' => 'New row']);
+            $this->assertSame('pending', DB::table($name)->where('id', 2)->value('note'));
+            if ($multiple) {
+                $this->assertSame(7, DB::table($name)->where('id', 2)->value('quantity'));
+            }
+            DB::table($name)->where('id', 2)->delete();
+
+            Schema::table($name, function (Blueprint $table) use ($multiple) {
+                $table->dropColumn($multiple ? ['note', 'quantity'] : 'note');
+            });
+            $this->assertSame($before, $this->readLifecycleColumnMetadata($name));
+            $this->assertEquals([(object) ['id' => 1, 'name' => 'Original']], DB::table($name)->get()->all());
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    #[Test]
+    public function it_renames_a_populated_column_and_restores_it()
+    {
+        $name = 'rename_data_lifecycle_test';
+
+        try {
+            Schema::dropIfExists($name);
+            Schema::create($name, function (Blueprint $table) {
+                $table->integer('id');
+                $table->string('old_value', 40)->nullable()->default('original');
+            });
+            DB::table($name)->insert(['id' => 1, 'old_value' => 'Saved value']);
+            DB::table($name)->insert(['id' => 2, 'old_value' => null]);
+            DB::table($name)->insert(['id' => 3]);
+            $before = $this->readLifecycleColumnMetadata($name);
+            $this->assertSame(37, $before[1]['field_type']);
+            $this->assertSame(40, $before[1]['length']);
+            $this->assertSame(0, $before[1]['null_flag']);
+            $this->assertSame("DEFAULT 'original'", $before[1]['default_source']);
+            $values = ['Saved value', null, 'original'];
+
+            Schema::table($name, fn (Blueprint $table) => $table->renameColumn('old_value', 'new_value'));
+            $renamed = $before;
+            $renamed[1]['name'] = 'new_value';
+            $this->assertSame($renamed, $this->readLifecycleColumnMetadata($name));
+            $this->assertSame($values, DB::table($name)->orderBy('id')->pluck('new_value')->all());
+
+            Schema::table($name, fn (Blueprint $table) => $table->renameColumn('new_value', 'old_value'));
+            $this->assertSame($before, $this->readLifecycleColumnMetadata($name));
+            $this->assertSame($values, DB::table($name)->orderBy('id')->pluck('old_value')->all());
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    #[Test]
+    public function it_changes_a_populated_column_and_enforces_default_and_nullability()
+    {
+        $name = 'change_data_lifecycle_test';
+
+        try {
+            Schema::dropIfExists($name);
+            Schema::create($name, function (Blueprint $table) {
+                $table->integer('id');
+                $table->string('value', 40)->nullable()->default('before');
+            });
+            DB::table($name)->insert(['id' => 1, 'value' => 'Saved value']);
+            $before = $this->readLifecycleColumnMetadata($name);
+
+            Schema::table($name, function (Blueprint $table) {
+                $table->string('value', 100)->nullable(false)->default('after')->change();
+            });
+            $expected = $before;
+            $expected[1]['length'] = 100;
+            $expected[1]['null_flag'] = 1;
+            $expected[1]['default_source'] = "DEFAULT 'after'";
+            $this->assertSame($expected, $this->readLifecycleColumnMetadata($name));
+            $this->assertSame('Saved value', DB::table($name)->where('id', 1)->value('value'));
+            DB::table($name)->insert(['id' => 2]);
+            $this->assertSame('after', DB::table($name)->where('id', 2)->value('value'));
+
+            try {
+                DB::table($name)->insert(['id' => 3, 'value' => null]);
+                $this->fail('NOT NULL must reject an explicit NULL.');
+            } catch (QueryException $exception) {
+                $this->assertInstanceOf(QueryException::class, $exception);
+            }
+            $this->assertFalse(DB::table($name)->where('id', 3)->exists());
+
+            // Restore default and nullability; retain the safely widened length.
+            Schema::table($name, function (Blueprint $table) {
+                $table->string('value', 100)->nullable()->default('before')->change();
+            });
+            $restored = $before;
+            $restored[1]['length'] = 100;
+            $this->assertSame($restored, $this->readLifecycleColumnMetadata($name));
+            DB::table($name)->insert(['id' => 3, 'value' => null]);
+            DB::table($name)->insert(['id' => 4]);
+            $this->assertSame(['Saved value', 'after', null, 'before'], DB::table($name)->orderBy('id')->pluck('value')->all());
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    #[Test]
+    #[DataProvider('unsupportedLifecycleOperations')]
+    public function it_rejects_unsupported_schema_operations_without_changing_schema(string $operation)
+    {
+        $name = 'unsupported_lifecycle_test';
+        $target = 'unsupported_target_test';
+
+        try {
+            Schema::dropIfExists($target);
+            Schema::dropIfExists($name);
+            Schema::create($name, function (Blueprint $table) {
+                $table->integer('id');
+                $table->string('value', 40)->nullable()->default('original');
+                $table->index('value', 'unsupported_original_idx');
+            });
+            DB::table($name)->insert(['id' => 1, 'value' => 'Saved value']);
+            $beforeColumns = $this->readLifecycleColumnMetadata($name);
+            $beforeIndexes = $this->readIndexIntrospectionMetadata($name);
+            $exception = null;
+
+            try {
+                match ($operation) {
+                    'temporary' => Schema::create($target, function (Blueprint $table) {
+                        $table->temporary();
+                        $table->integer('id');
+                    }),
+                    'rename' => Schema::rename($name, $target),
+                    'renameIndex' => Schema::table($name, fn (Blueprint $table) => $table->renameIndex('unsupported_original_idx', 'unsupported_renamed_idx')),
+                    'spatialIndex' => Schema::table($name, fn (Blueprint $table) => $table->spatialIndex('value', 'unsupported_spatial_idx')),
+                };
+            } catch (\Exception $caught) {
+                $exception = $caught;
+            }
+
+            // Verify preservation even when an unsupported command silently does nothing.
+            $this->assertFalse(Schema::hasTable($target));
+            $this->assertTrue(Schema::hasTable($name));
+            $this->assertSame($beforeColumns, $this->readLifecycleColumnMetadata($name));
+            $this->assertEquals($beforeIndexes, $this->readIndexIntrospectionMetadata($name));
+            $this->assertEquals([(object) ['id' => 1, 'value' => 'Saved value']], DB::table($name)->get()->all());
+            $this->assertNotNull($exception, $operation.' must throw an explicit exception instead of silently succeeding.');
+        } finally {
+            Schema::dropIfExists($target);
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function unsupportedLifecycleOperations(): array
+    {
+        return [
+            'temporary table' => ['temporary'],
+            'rename table' => ['rename'],
+            'rename index' => ['renameIndex'],
+            'spatial index' => ['spatialIndex'],
+        ];
+    }
+
+    private function readLifecycleColumnMetadata(string $table): array
+    {
+        return array_map(fn (object $column) => (array) $column, DB::select(<<<'SQL'
+            SELECT TRIM(rf.RDB$FIELD_NAME) AS "name",
+                   f.RDB$FIELD_TYPE AS "field_type",
+                   f.RDB$CHARACTER_LENGTH AS "length",
+                   COALESCE(rf.RDB$NULL_FLAG, 0) AS "null_flag",
+                   TRIM(CAST(rf.RDB$DEFAULT_SOURCE AS VARCHAR(255))) AS "default_source"
+            FROM RDB$RELATION_FIELDS rf
+            JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+            WHERE rf.RDB$RELATION_NAME = ?
+            ORDER BY rf.RDB$FIELD_POSITION
+        SQL, [$table]));
+    }
+
+    #[Test]
     public function it_drops_a_column()
     {
         Schema::dropIfExists('drop_column_test');

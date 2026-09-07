@@ -213,6 +213,16 @@ class FirebirdGrammar extends Grammar
     }
 
     /**
+     * Reject unsupported table renaming.
+     *
+     * @throws \LogicException
+     */
+    public function compileRename(Blueprint $blueprint, Fluent $command)
+    {
+        throw new \LogicException('This database driver does not support renaming tables.');
+    }
+
+    /**
      * Compile a drop table command.
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
@@ -252,9 +262,7 @@ class FirebirdGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        $columns = $this->prefixArray('ADD', $this->getColumns($blueprint));
-
-        return 'ALTER TABLE '.$table.' '.implode(', ', $columns);
+        return 'ALTER TABLE '.$table.' ADD '.$this->getColumn($blueprint, $command->column);
     }
 
     /**
@@ -361,6 +369,26 @@ class FirebirdGrammar extends Grammar
         $table = $this->wrapTable($blueprint);
 
         return "CREATE INDEX {$index} ON {$table} ($columns)";
+    }
+
+    /**
+     * Reject unsupported index renaming.
+     *
+     * @throws \LogicException
+     */
+    public function compileRenameIndex(Blueprint $blueprint, Fluent $command)
+    {
+        throw new \LogicException('This database driver does not support renaming indexes.');
+    }
+
+    /**
+     * Reject unsupported spatial index creation.
+     *
+     * @throws \LogicException
+     */
+    public function compileSpatialIndex(Blueprint $blueprint, Fluent $command)
+    {
+        throw new \LogicException('This database driver does not support creating spatial indexes.');
     }
 
     /**
