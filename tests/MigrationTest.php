@@ -1212,6 +1212,10 @@ class MigrationTest extends TestCase
     #[DataProvider('introspectionForeignKeyKinds')]
     public function it_introspects_foreign_key_existence(string $kind, array $columns, array $foreignColumns)
     {
+        if (! method_exists(Schema::getFacadeRoot(), 'hasForeignKey')) {
+            $this->markTestSkipped('This Laravel version does not support Schema::hasForeignKey().');
+        }
+
         try {
             $this->createForeignKeyIntrospectionTables($kind);
             $metadata = $this->readForeignKeyIntrospectionMetadata();
