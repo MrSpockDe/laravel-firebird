@@ -13,6 +13,195 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    public function it_enforces_foreign_id_constrained()
+    {
+        $parent = 'fk_helper_parents';
+        $child = 'fk_helper_children';
+        try {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+            Schema::create($parent, fn (Blueprint $table) => $table->id());
+            Schema::create($child, function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('fk_helper_parent_id')->constrained();
+            });
+            $this->assertForeignKeyDefinition($child, ['fk_helper_parent_id'], $parent, ['id']);
+            $columns = array_column(Schema::getColumns($child), null, 'name');
+            $this->assertSame('bigint', $columns['fk_helper_parent_id']['type_name']);
+            $this->assertFalse($columns['fk_helper_parent_id']['auto_increment']);
+            $this->assertFalse($columns['fk_helper_parent_id']['nullable']);
+            DB::table($parent)->insert(['id' => 1]);
+            DB::table($child)->insert(['fk_helper_parent_id' => 1]);
+            $this->assertRejectedForeignKeyInsert($child, ['fk_helper_parent_id' => 999]);
+            $this->assertSame([1], DB::table($child)->pluck('fk_helper_parent_id')->all());
+        } finally {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+        }
+    }
+
+    #[Test]
+    public function it_creates_and_drops_a_foreign_key_constraint()
+    {
+        $parent = 'fk_lifecycle_parents';
+        $child = 'fk_lifecycle_children';
+        try {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+            Schema::create($parent, fn (Blueprint $table) => $table->id());
+            Schema::create($child, function (Blueprint $table) use ($parent) {
+                $table->bigInteger('parent_id');
+                $table->foreign('parent_id', 'fk_lifecycle_reference')->references('id')->on($parent);
+            });
+            $this->assertForeignKeyDefinition($child, ['parent_id'], $parent, ['id']);
+            DB::table($parent)->insert(['id' => 1]);
+            DB::table($child)->insert(['parent_id' => 1]);
+            $this->assertRejectedForeignKeyInsert($child, ['parent_id' => 999]);
+            Schema::table($child, fn (Blueprint $table) => $table->dropForeign('fk_lifecycle_reference'));
+            $this->assertSame([], Schema::getForeignKeys($child));
+            $this->assertTrue(Schema::hasColumn($child, 'parent_id'));
+            DB::table($child)->insert(['parent_id' => 999]);
+            $this->assertSame([1, 999], DB::table($child)->orderBy('parent_id')->pluck('parent_id')->all());
+        } finally {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+        }
+    }
+
+    #[Test]
+    public function it_cascades_parent_deletion_to_constrained_children()
+    {
+        $parent = 'fk_cascade_parents';
+        $child = 'fk_cascade_children';
+        try {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+            Schema::create($parent, fn (Blueprint $table) => $table->id());
+            Schema::create($child, function (Blueprint $table) use ($parent) {
+                $table->foreignId('parent_id')->constrained($parent)->cascadeOnDelete();
+            });
+            $this->assertForeignKeyDefinition($child, ['parent_id'], $parent, ['id']);
+            $this->assertSame('cascade', Schema::getForeignKeys($child)[0]['on_delete']);
+            foreach ([1, 2] as $id) {
+                DB::table($parent)->insert(['id' => $id]);
+                DB::table($child)->insert(['parent_id' => $id]);
+            }
+            $this->assertSame(2, DB::table($child)->count());
+            DB::table($parent)->where('id', 1)->delete();
+            $this->assertSame([2], DB::table($child)->pluck('parent_id')->all());
+            $this->assertSame([2], DB::table($parent)->pluck('id')->all());
+        } finally {
+            // Release attachment-held cascade requests before dropping their tables.
+            DB::disconnect();
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+        }
+    }
+
+    #[Test]
+    public function it_enforces_and_drops_a_composite_foreign_key()
+    {
+        $parent = 'fk_pair_parents';
+        $child = 'fk_pair_children';
+        try {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+            Schema::create($parent, function (Blueprint $table) {
+                $table->integer('key_a');
+                $table->integer('key_b');
+                $table->primary(['key_b', 'key_a']);
+            });
+            Schema::create($child, function (Blueprint $table) use ($parent) {
+                $table->integer('ref_a');
+                $table->integer('ref_b');
+                $table->foreign(['ref_b', 'ref_a'], 'fk_pair_reference')
+                    ->references(['key_b', 'key_a'])->on($parent);
+            });
+            $this->assertForeignKeyDefinition($child, ['ref_b', 'ref_a'], $parent, ['key_b', 'key_a']);
+            $indexes = Schema::getIndexes($parent);
+            $this->assertCount(1, $indexes);
+            $this->assertTrue($indexes[0]['primary']);
+            $this->assertSame(['key_b', 'key_a'], $indexes[0]['columns']);
+            DB::table($parent)->insert(['key_a' => 1, 'key_b' => 10]);
+            DB::table($parent)->insert(['key_a' => 2, 'key_b' => 20]);
+            DB::table($child)->insert(['ref_a' => 1, 'ref_b' => 10]);
+            // Both values exist individually, but their combination does not.
+            $invalid = ['ref_a' => 1, 'ref_b' => 20];
+            $this->assertRejectedForeignKeyInsert($child, $invalid);
+            Schema::table($child, fn (Blueprint $table) => $table->dropForeign('fk_pair_reference'));
+            $this->assertSame([], Schema::getForeignKeys($child));
+            DB::table($child)->insert($invalid);
+            $this->assertSame([10, 20], DB::table($child)->orderBy('ref_b')->pluck('ref_b')->all());
+        } finally {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+        }
+    }
+
+    #[Test]
+    public function it_drops_a_foreign_key_with_a_long_generated_name()
+    {
+        $parent = 'fk_long_parents';
+        $child = 'foreign_key_long_identifier_children';
+        $column = 'parent_reference_identifier_value';
+        $generatedName = null;
+        try {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+            Schema::create($parent, fn (Blueprint $table) => $table->id());
+            Schema::create($child, function (Blueprint $table) use ($parent, $column, &$generatedName) {
+                $table->bigInteger($column);
+                $generatedName = $table->foreign($column)->references('id')->on($parent)->index;
+            });
+            $this->assertGreaterThan(63, strlen($generatedName));
+            $this->assertForeignKeyDefinition($child, [$column], $parent, ['id']);
+            $actualName = Schema::getForeignKeys($child)[0]['name'];
+            $this->assertNotSame('', $actualName);
+            $this->assertNotSame($generatedName, $actualName);
+            DB::table($parent)->insert(['id' => 1]);
+            DB::table($child)->insert([$column => 1]);
+            $this->assertRejectedForeignKeyInsert($child, [$column => 999]);
+            Schema::table($child, fn (Blueprint $table) => $table->dropForeign([$column]));
+            $this->assertSame([], Schema::getForeignKeys($child));
+            $this->assertNull(DB::selectOne(<<<'SQL'
+                SELECT RDB$CONSTRAINT_NAME
+                FROM RDB$RELATION_CONSTRAINTS
+                WHERE RDB$RELATION_NAME = ? AND RDB$CONSTRAINT_NAME = ?
+            SQL, [$child, $actualName]));
+            DB::table($child)->insert([$column => 999]);
+            // Check persistence without relying on PDO's length-limited result column names.
+            $this->assertSame(2, DB::table($child)->count());
+            $this->assertTrue(DB::table($child)->where($column, 1)->exists());
+            $this->assertTrue(DB::table($child)->where($column, 999)->exists());
+        } finally {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+        }
+    }
+
+    private function assertForeignKeyDefinition(string $child, array $columns, string $parent, array $foreignColumns): void
+    {
+        $keys = Schema::getForeignKeys($child);
+        $this->assertCount(1, $keys);
+        $this->assertNotSame('', $keys[0]['name']);
+        $this->assertSame($columns, $keys[0]['columns']);
+        $this->assertSame($parent, $keys[0]['foreign_table']);
+        $this->assertSame($foreignColumns, $keys[0]['foreign_columns']);
+    }
+
+    private function assertRejectedForeignKeyInsert(string $table, array $values): void
+    {
+        $before = DB::table($table)->count();
+        try {
+            DB::table($table)->insert($values);
+            $this->fail('Firebird must reject a child row without a matching parent key.');
+        } catch (QueryException $exception) {
+            $this->assertSame('23000', $exception->errorInfo[0]);
+        }
+        $this->assertSame($before, DB::table($table)->count());
+    }
+
+    #[Test]
     public function it_adds_and_drops_a_column_without_losing_existing_data()
     {
         $this->assertAddedColumnLifecycle(false);

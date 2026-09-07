@@ -456,7 +456,7 @@ class FirebirdGrammar extends Grammar
 
         $onColumns = $this->columnize((array) $command->references);
 
-        $fkName = substr($command->index, 0, 31);
+        $fkName = $this->normalizeForeignKeyName($command->index);
 
         $sql = "ALTER TABLE {$table} ADD CONSTRAINT {$fkName} ";
 
@@ -487,7 +487,17 @@ class FirebirdGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        return "ALTER TABLE {$table} DROP CONSTRAINT {$command->index}";
+        $fkName = $this->normalizeForeignKeyName($command->index);
+
+        return "ALTER TABLE {$table} DROP CONSTRAINT {$fkName}";
+    }
+
+    /**
+     * Apply the existing foreign key name length convention to create and drop.
+     */
+    protected function normalizeForeignKeyName(string $name): string
+    {
+        return substr($name, 0, 31);
     }
 
     /**
