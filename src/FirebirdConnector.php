@@ -19,7 +19,11 @@ class FirebirdConnector extends Connector implements ConnectorInterface
 
         $options = $this->getOptions($config);
 
-        return $this->createConnection($dsn, $config, $options);
+        $connection = $this->createConnection($dsn, $config, $options);
+
+        $connection->exec('SET BIND OF TIME ZONE TO VARCHAR');
+
+        return $connection;
     }
 
     /**
