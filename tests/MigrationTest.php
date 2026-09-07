@@ -1301,6 +1301,149 @@ class MigrationTest extends TestCase
         SQL);
     }
 
+    #[Test]
+    public function it_uses_native_boolean_metadata()
+    {
+        Schema::dropIfExists('native_boolean_test');
+
+        try {
+            Schema::create('native_boolean_test', function (Blueprint $table) {
+                $table->id();
+                $table->boolean('flag');
+            });
+
+            $metadata = $this->readBooleanMetadata('native_boolean_test');
+            $this->assertNotNull($metadata);
+            $this->assertSame(23, $metadata->field_type);
+
+            $columns = array_column(Schema::getColumns('native_boolean_test'), null, 'name');
+            $this->assertSame('boolean', $columns['flag']['type_name']);
+            $this->assertSame('boolean', $columns['flag']['type']);
+            $this->assertFalse($columns['flag']['nullable']);
+            $this->assertSame('boolean', Schema::getColumnType('native_boolean_test', 'flag'));
+            $this->assertSame('boolean', Schema::getColumnType('native_boolean_test', 'flag', true));
+        } finally {
+            Schema::dropIfExists('native_boolean_test');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('nativeBooleanDefaults')]
+    public function it_uses_native_boolean_defaults(bool $default)
+    {
+        Schema::dropIfExists('native_bool_default_test');
+
+        try {
+            Schema::create('native_bool_default_test', function (Blueprint $table) use ($default) {
+                $table->integer('id');
+                $table->boolean('flag')->default($default);
+            });
+
+            DB::table('native_bool_default_test')->insert(['id' => 1]);
+            $this->assertSame($default, DB::table('native_bool_default_test')->where('id', 1)->value('flag'));
+            $metadata = $this->readBooleanMetadata('native_bool_default_test');
+            $this->assertNotNull($metadata);
+            $this->assertSame(23, $metadata->field_type);
+            $this->assertNotNull($metadata->default_source);
+        } finally {
+            Schema::dropIfExists('native_bool_default_test');
+        }
+    }
+
+    #[Test]
+    public function it_uses_native_boolean_nullable()
+    {
+        Schema::dropIfExists('native_bool_nullable_test');
+
+        try {
+            Schema::create('native_bool_nullable_test', function (Blueprint $table) {
+                $table->integer('id');
+                $table->boolean('flag')->nullable();
+            });
+
+            DB::table('native_bool_nullable_test')->insert(['id' => 1, 'flag' => null]);
+            $this->assertNull(DB::table('native_bool_nullable_test')->where('id', 1)->value('flag'));
+            $columns = array_column(Schema::getColumns('native_bool_nullable_test'), null, 'name');
+            $this->assertTrue($columns['flag']['nullable']);
+            $this->assertSame('boolean', $columns['flag']['type_name']);
+            $this->assertSame(23, $this->readBooleanMetadata('native_bool_nullable_test')->field_type);
+        } finally {
+            Schema::dropIfExists('native_bool_nullable_test');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('nativeBooleanInputs')]
+    public function it_uses_native_boolean_query_builder_round_trip(bool|int $input, bool $expected)
+    {
+        Schema::dropIfExists('native_bool_query_test');
+
+        try {
+            Schema::create('native_bool_query_test', function (Blueprint $table) {
+                $table->integer('id');
+                $table->boolean('flag');
+            });
+
+            DB::table('native_bool_query_test')->insert(['id' => 1, 'flag' => $input]);
+            $value = DB::table('native_bool_query_test')->where('id', 1)->value('flag');
+            $this->assertSame($expected, $value);
+        } finally {
+            Schema::dropIfExists('native_bool_query_test');
+        }
+    }
+
+    #[Test]
+    #[DataProvider('nativeBooleanInputs')]
+    public function it_uses_native_boolean_eloquent_round_trip(bool|int $input, bool $expected)
+    {
+        Schema::dropIfExists('native_bool_model_test');
+
+        try {
+            Schema::create('native_bool_model_test', function (Blueprint $table) {
+                $table->id();
+                $table->boolean('flag');
+            });
+
+            $model = NativeBooleanTestModel::create(['flag' => $input])->fresh();
+            $this->assertNotNull($model);
+            $this->assertSame($expected, $model->flag);
+            $this->assertSame($expected, $model->getRawOriginal('flag'));
+        } finally {
+            Schema::dropIfExists('native_bool_model_test');
+        }
+    }
+
+    public static function nativeBooleanDefaults(): array
+    {
+        return ['true' => [true], 'false' => [false]];
+    }
+
+    public static function nativeBooleanInputs(): array
+    {
+        return [
+            'true' => [true, true],
+            'false' => [false, false],
+            'one' => [1, true],
+            'zero' => [0, false],
+        ];
+    }
+
+    private function readBooleanMetadata(string $table): ?object
+    {
+        return DB::selectOne(<<<'SQL'
+            SELECT TRIM(rf.RDB$FIELD_NAME) AS "name",
+                   f.RDB$FIELD_TYPE AS "field_type",
+                   f.RDB$FIELD_SUB_TYPE AS "field_sub_type",
+                   f.RDB$FIELD_LENGTH AS "field_length",
+                   f.RDB$CHARACTER_LENGTH AS "character_length",
+                   COALESCE(rf.RDB$NULL_FLAG, 0) AS "null_flag",
+                   rf.RDB$DEFAULT_SOURCE AS "default_source"
+            FROM RDB$RELATION_FIELDS rf
+            JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+            WHERE rf.RDB$RELATION_NAME = ? AND rf.RDB$FIELD_NAME = 'flag'
+        SQL, [$table]);
+    }
+
     public static function incrementTypes(): array
     {
         return [
@@ -1318,4 +1461,15 @@ class IdentityTestModel extends Model
     public $timestamps = false;
 
     protected $fillable = ['name'];
+}
+
+class NativeBooleanTestModel extends Model
+{
+    protected $table = 'native_bool_model_test';
+
+    public $timestamps = false;
+
+    protected $fillable = ['flag'];
+
+    protected $casts = ['flag' => 'boolean'];
 }

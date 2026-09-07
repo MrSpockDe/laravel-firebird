@@ -13,7 +13,7 @@ class FirebirdGrammar extends Grammar
      *
      * @var array
      */
-    protected $modifiers = ['Charset', 'Collate', 'Increment', 'Nullable', 'Default'];
+    protected $modifiers = ['Charset', 'Collate', 'Increment', 'Default', 'Nullable'];
 
     /**
      * The columns available as serials.
@@ -511,6 +511,10 @@ class FirebirdGrammar extends Grammar
      */
     protected function modifyDefault(Blueprint $blueprint, Fluent $column)
     {
+        if ($column->type === 'boolean' && is_bool($column->default)) {
+            return $column->default ? ' DEFAULT TRUE' : ' DEFAULT FALSE';
+        }
+
         if (! is_null($column->default)) {
             return ' DEFAULT '.$this->getDefaultValue($column->default);
         }
@@ -679,7 +683,7 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeBoolean(Fluent $column)
     {
-        return 'CHAR(1)';
+        return 'BOOLEAN';
     }
 
     /**
