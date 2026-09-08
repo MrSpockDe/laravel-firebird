@@ -534,7 +534,8 @@ class QueryTest extends TestCase
     #[Test]
     public function it_can_filter_where_time()
     {
-        $now = now()->toImmutable();
+        // Keep subMillisecond() within the same second, independently of the clock.
+        $now = \Carbon\CarbonImmutable::parse('2026-01-15 12:34:56.500000', 'UTC');
 
         // When a DateTimeInterface is passed to whereTime(), the time is
         // accurate to the second.
