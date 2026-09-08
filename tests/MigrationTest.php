@@ -13,6 +13,129 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    #[DataProvider('convenienceColumnHelpers')]
+    public function it_creates_and_drops_convenience_columns(string $method, string $dropMethod, array $names, string $type, int $fieldType, ?int $length, string $value)
+    {
+        $tableName = 'helper_columns_test';
+        try {
+            Schema::dropIfExists($tableName);
+            Schema::create($tableName, function (Blueprint $table) use ($method) {
+                $table->integer('id');
+                $table->{$method}();
+            });
+            $columns = array_column(Schema::getColumns($tableName), null, 'name');
+            $metadata = array_column($this->readLifecycleColumnMetadata($tableName), null, 'name');
+            $this->assertSame(array_merge(['id'], $names), array_keys($columns));
+            foreach ($names as $name) {
+                $this->assertSame($type, $columns[$name]['type_name']);
+                $this->assertTrue($columns[$name]['nullable']);
+                $this->assertSame($fieldType, $metadata[$name]['field_type']);
+                $this->assertSame(0, $metadata[$name]['null_flag']);
+                if ($length !== null) {
+                    $this->assertSame($length, $metadata[$name]['length']);
+                }
+            }
+            DB::table($tableName)->insert(['id' => 1] + array_fill_keys($names, $value));
+            DB::table($tableName)->insert(['id' => 2]);
+            $row = DB::table($tableName)->where('id', 1)->first();
+            $nullRow = DB::table($tableName)->where('id', 2)->first();
+            foreach ($names as $name) {
+                $this->assertNull($nullRow->{$name});
+                if ($method === 'softDeletesTz') {
+                    $this->assertIsString($row->{$name});
+                    $this->assertMatchesRegularExpression('/(?:[+-][0-9]{2}:[0-9]{2}|[A-Za-z]+(?:\/[A-Za-z_]+)*)$/', $row->{$name});
+                    $this->assertSame(
+                        (new \DateTimeImmutable($value))->getTimestamp(),
+                        (new \DateTimeImmutable($row->{$name}))->getTimestamp(),
+                    );
+                } else {
+                    $this->assertSame($value, $row->{$name});
+                }
+            }
+            Schema::table($tableName, fn (Blueprint $table) => $table->{$dropMethod}());
+            $this->assertSame(['id'], array_column($this->readLifecycleColumnMetadata($tableName), 'name'));
+            $this->assertSame([1, 2], DB::table($tableName)->orderBy('id')->pluck('id')->all());
+        } finally {
+            Schema::dropIfExists($tableName);
+        }
+    }
+
+    public static function convenienceColumnHelpers(): array
+    {
+        return [
+            'timestamps' => ['timestamps', 'dropTimestamps', ['created_at', 'updated_at'], 'timestamp', 35, null, '2026-01-15 12:34:56'],
+            'remember token' => ['rememberToken', 'dropRememberToken', ['remember_token'], 'varchar', 37, 100, str_repeat('a', 100)],
+            'soft deletes' => ['softDeletes', 'dropSoftDeletes', ['deleted_at'], 'timestamp', 35, null, '2026-01-15 12:34:56'],
+            'soft deletes TZ' => ['softDeletesTz', 'dropSoftDeletesTz', ['deleted_at'], 'timestamp with time zone', 29, null, '2026-01-15 12:34:56 +02:00'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('convenienceMorphHelpers')]
+    public function it_creates_and_drops_morph_columns(string $method, bool $nullable, string $type, int $fieldType, ?int $length, int|string $value)
+    {
+        $tableName = 'helper_morph_test';
+        try {
+            Schema::dropIfExists($tableName);
+            Schema::create($tableName, function (Blueprint $table) use ($method) {
+                $table->integer('id');
+                $table->{$method}('subject');
+            });
+            $columns = array_column(Schema::getColumns($tableName), null, 'name');
+            $metadata = array_column($this->readLifecycleColumnMetadata($tableName), null, 'name');
+            $this->assertSame(['id', 'subject_type', 'subject_id'], array_keys($columns));
+            $this->assertSame('varchar', $columns['subject_type']['type_name']);
+            $this->assertSame(37, $metadata['subject_type']['field_type']);
+            $this->assertSame(255, $metadata['subject_type']['length']);
+            $this->assertSame($type, $columns['subject_id']['type_name']);
+            $this->assertSame($fieldType, $metadata['subject_id']['field_type']);
+            if ($length !== null) {
+                $this->assertSame($length, $metadata['subject_id']['length']);
+            }
+            foreach (['subject_type', 'subject_id'] as $name) {
+                $this->assertSame($nullable, $columns[$name]['nullable']);
+                $this->assertSame($nullable ? 0 : 1, $metadata[$name]['null_flag']);
+                $this->assertFalse($columns[$name]['auto_increment']);
+            }
+            $indexes = Schema::getIndexes($tableName);
+            $this->assertCount(1, $indexes);
+            $this->assertSame(['subject_type', 'subject_id'], $indexes[0]['columns']);
+            $this->assertFalse($indexes[0]['unique']);
+            $this->assertFalse($indexes[0]['primary']);
+            $this->assertSame(['subject_type', 'subject_id'], array_column($this->readIndexIntrospectionMetadata($tableName), 'column_name'));
+            DB::table($tableName)->insert(['id' => 1, 'subject_type' => 'Article', 'subject_id' => $value]);
+            $row = DB::table($tableName)->where('id', 1)->first();
+            $this->assertSame('Article', $row->subject_type);
+            $this->assertSame($value, $row->subject_id);
+            if ($nullable) {
+                DB::table($tableName)->insert(['id' => 2, 'subject_type' => null, 'subject_id' => null]);
+                $row = DB::table($tableName)->where('id', 2)->first();
+                $this->assertNull($row->subject_type);
+                $this->assertNull($row->subject_id);
+            }
+            Schema::table($tableName, fn (Blueprint $table) => $table->dropMorphs('subject'));
+            $this->assertSame(['id'], array_column($this->readLifecycleColumnMetadata($tableName), 'name'));
+            $this->assertSame([], Schema::getIndexes($tableName));
+            $this->assertSame([], $this->readIndexIntrospectionMetadata($tableName));
+            $this->assertSame($nullable ? [1, 2] : [1], DB::table($tableName)->orderBy('id')->pluck('id')->all());
+        } finally {
+            Schema::dropIfExists($tableName);
+        }
+    }
+
+    public static function convenienceMorphHelpers(): array
+    {
+        return [
+            'numeric' => ['morphs', false, 'bigint', 16, null, 42],
+            'nullable numeric' => ['nullableMorphs', true, 'bigint', 16, null, 42],
+            'UUID' => ['uuidMorphs', false, 'char', 14, 36, '550e8400-e29b-41d4-a716-446655440000'],
+            'nullable UUID' => ['nullableUuidMorphs', true, 'char', 14, 36, '550e8400-e29b-41d4-a716-446655440000'],
+            'ULID' => ['ulidMorphs', false, 'char', 14, 26, '01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+            'nullable ULID' => ['nullableUlidMorphs', true, 'char', 14, 26, '01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+        ];
+    }
+
+    #[Test]
     public function it_enforces_foreign_id_constrained()
     {
         $parent = 'fk_helper_parents';
