@@ -44,6 +44,36 @@ class FirebirdGrammar extends Grammar
     ];
 
     /**
+     * Compile globally ordered unions through a derived table.
+     */
+    public function compileSelect(Builder $query)
+    {
+        if (! $query->unions || empty($query->unionOrders)) {
+            return parent::compileSelect($query);
+        }
+
+        // Let Laravel place aggregates outside the ordered union without
+        // allowing its aggregate compiler to mutate the original builder.
+        if ($query->aggregate) {
+            return parent::compileSelect(clone $query);
+        }
+
+        $inner = $query->cloneWithout(['unionOrders', 'unionLimit', 'unionOffset']);
+        $sql = 'select * from ('.parent::compileSelect($inner).') as '.$this->wrapTable('firebird_union');
+        $sql .= ' '.$this->compileOrders($query, $query->unionOrders);
+
+        if (isset($query->unionOffset)) {
+            $sql .= ' '.$this->compileOffset($query, $query->unionOffset);
+        }
+
+        if (isset($query->unionLimit)) {
+            $sql .= ' '.$this->compileLimit($query, $query->unionLimit);
+        }
+
+        return $sql;
+    }
+
+    /**
      * Compile the "limit" portions of the query.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
