@@ -223,6 +223,40 @@ class FirebirdGrammar extends Grammar
         return trim("{$join->type} join lateral {$expression} on true");
     }
 
+    /** {@inheritDoc} */
+    protected function compileUpdateWithoutJoins(Builder $query, $table, $columns, $where)
+    {
+        return parent::compileUpdateWithoutJoins($query, $table, $columns, $where)
+            .$this->compileDmlOrdersAndRows($query);
+    }
+
+    /** {@inheritDoc} */
+    protected function compileDeleteWithoutJoins(Builder $query, $table, $where)
+    {
+        return parent::compileDeleteWithoutJoins($query, $table, $where)
+            .$this->compileDmlOrdersAndRows($query);
+    }
+
+    /**
+     * Compile ordering and row bounds for UPDATE and DELETE, not SELECT.
+     */
+    protected function compileDmlOrdersAndRows(Builder $query)
+    {
+        $orders = $this->compileOrders($query, $query->orders);
+        $sql = $orders === '' ? '' : ' '.$orders;
+
+        if (isset($query->limit)) {
+            if ($query->limit === 0 || ! $query->offset) {
+                $sql .= ' rows '.(int) $query->limit;
+            } else {
+                $sql .= ' rows '.((int) $query->offset + 1)
+                    .' to '.((int) $query->offset + (int) $query->limit);
+            }
+        }
+
+        return $sql;
+    }
+
     /**
      * Compile an insert and get ID statement into SQL.
      *

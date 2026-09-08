@@ -10,6 +10,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 
@@ -1622,6 +1623,138 @@ class QueryTest extends TestCase
 
         // Check the order of the results.
         $this->assertTrue($results->first()->id < $results->last()->id);
+    }
+
+    #[Test]
+    public function it_can_update_with_order_by_and_limit()
+    {
+        foreach (['Bravo', 'Charlie', 'Alpha', 'Outside'] as $name) {
+            DB::table('users')->insert([
+                'name' => $name,
+                'email' => strtolower($name).'@example.test',
+                'country' => $name === 'Outside' ? 'Control' : 'Target',
+                'city' => 'Original',
+            ]);
+        }
+
+        $query = DB::table('users')->where('country', 'Target');
+
+        $this->assertSame(3, (clone $query)->count());
+
+        $affected = $query->orderBy('name', 'desc')->limit(1)->update(['city' => 'Updated']);
+
+        $this->assertSame([
+            'affected' => 1,
+            'cities' => [
+                'Alpha' => 'Original',
+                'Bravo' => 'Original',
+                'Charlie' => 'Updated',
+                'Outside' => 'Original',
+            ],
+        ], [
+            'affected' => $affected,
+            'cities' => DB::table('users')->orderBy('name')->pluck('city', 'name')->all(),
+        ]);
+    }
+
+    #[Test]
+    public function it_can_delete_with_order_by_and_limit()
+    {
+        foreach (['Bravo', 'Charlie', 'Alpha', 'Outside'] as $name) {
+            DB::table('users')->insert([
+                'name' => $name,
+                'email' => strtolower($name).'@example.test',
+                'country' => $name === 'Outside' ? 'Control' : 'Target',
+            ]);
+        }
+
+        $query = DB::table('users')->where('country', 'Target');
+
+        $this->assertSame(3, (clone $query)->count());
+
+        $affected = $query->orderBy('name', 'desc')->limit(1)->delete();
+
+        $this->assertSame([
+            'affected' => 1,
+            'names' => ['Alpha', 'Bravo', 'Outside'],
+        ], [
+            'affected' => $affected,
+            'names' => DB::table('users')->orderBy('name')->pluck('name')->all(),
+        ]);
+    }
+
+    #[Test]
+    #[DataProvider('boundedDmlCases')]
+    public function it_applies_dml_ordering_and_row_bounds(string $operation, string $scenario, array $selected)
+    {
+        foreach (['Bravo', 'Charlie', 'Alpha', 'Outside'] as $name) {
+            DB::table('users')->insert([
+                'name' => $name,
+                'email' => strtolower($name).'@example.test',
+                'country' => $name === 'Outside' ? 'Control' : 'Target',
+                'city' => 'Original',
+            ]);
+        }
+
+        $query = DB::table('users')->where('country', 'Target');
+        if ($scenario !== 'plain') {
+            if ($scenario === 'raw_order') {
+                $query->orderByRaw('case when "name" = ? then 0 else 1 end', ['Bravo']);
+            }
+            $query->orderBy('name', 'desc');
+            if ($scenario !== 'order_only') {
+                $query->limit(str_starts_with($scenario, 'zero') ? 0 : 1);
+            }
+            if (in_array($scenario, ['offset', 'zero_offset'])) {
+                $query->offset(1);
+            }
+        }
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        try {
+            $affected = $operation === 'update'
+                ? $query->update(['city' => 'Updated'])
+                : $query->delete();
+            $log = DB::getQueryLog();
+        } finally {
+            DB::disableQueryLog();
+            DB::flushQueryLog();
+        }
+
+        $expected = [];
+        foreach (['Alpha', 'Bravo', 'Charlie', 'Outside'] as $name) {
+            if ($operation === 'delete' && in_array($name, $selected)) {
+                continue;
+            }
+            $expected[$name] = $operation === 'update' && in_array($name, $selected)
+                ? 'Updated' : 'Original';
+        }
+
+        $this->assertSame($expected, DB::table('users')->orderBy('name')->pluck('city', 'name')->all());
+        $this->assertSame(count($selected), $affected);
+
+        $bindings = $operation === 'update' ? ['Updated', 'Target'] : ['Target'];
+        if ($scenario === 'raw_order') {
+            $bindings[] = 'Bravo';
+        }
+        $this->assertSame($bindings, $log[0]['bindings']);
+    }
+
+    public static function boundedDmlCases(): iterable
+    {
+        foreach (['update', 'delete'] as $operation) {
+            foreach ([
+                'offset' => ['Bravo'],
+                'zero' => [],
+                'zero_offset' => [],
+                'raw_order' => ['Bravo'],
+                'plain' => ['Alpha', 'Bravo', 'Charlie'],
+                'order_only' => ['Alpha', 'Bravo', 'Charlie'],
+            ] as $scenario => $selected) {
+                yield $operation.'_'.$scenario => [$operation, $scenario, $selected];
+            }
+        }
     }
 
     #[Test]
