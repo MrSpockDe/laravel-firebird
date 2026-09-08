@@ -1332,7 +1332,100 @@ class QueryTest extends TestCase
     #[Test]
     public function it_can_union_queries_with_order_by()
     {
-        $this->markTestSkipped('The necessary grammar for unionOrders has not been implemented.');
+        $ids = $this->createUnionOrderingFixture();
+        $query = DB::table('orders')->where('price', 16)
+            ->union(DB::table('orders')->where('price', 100))
+            ->orderBy('price')->orderByDesc('id');
+
+        $this->assertSame([$ids[4], $ids[2], $ids[1]], $query->get()->pluck('id')->all());
+    }
+
+    #[Test]
+    public function it_can_union_all_queries_with_order_by_and_duplicates()
+    {
+        $ids = $this->createUnionOrderingFixture();
+        $query = DB::table('orders')->select('id', 'price')->where('price', 100)
+            ->unionAll(DB::table('orders')->select('id', 'price')->where('price', 100))
+            ->orderByDesc('id');
+
+        $this->assertSame([$ids[2], $ids[2], $ids[1], $ids[1]], $query->get()->pluck('id')->all());
+        $distinct = DB::table('orders')->select('id', 'price')->where('price', 100)
+            ->union(DB::table('orders')->select('id', 'price')->where('price', 100))
+            ->orderByDesc('id');
+        $this->assertSame([$ids[2], $ids[1]], $distinct->get()->pluck('id')->all());
+    }
+
+    #[Test]
+    public function it_preserves_local_union_orders_and_limits()
+    {
+        $ids = $this->createUnionOrderingFixture();
+        $query = DB::table('orders')->select('id', 'price')->where('price', '>', 70)
+            ->orderByDesc('id')->limit(1)
+            ->union(DB::table('orders')->select('id', 'price')->where('price', 100)->orderBy('id')->limit(1))
+            ->orderByDesc('price');
+
+        $this->assertSame([$ids[1], $ids[3]], $query->get()->pluck('id')->all());
+    }
+
+    #[Test]
+    public function it_paginates_globally_ordered_union_queries()
+    {
+        $ids = $this->createUnionOrderingFixture();
+        $query = DB::table('orders')->where('price', 16)
+            ->union(DB::table('orders')->where('price', 100))
+            ->orderBy('price')->orderByDesc('id');
+
+        $this->assertSame([$ids[4]], (clone $query)->limit(1)->get()->pluck('id')->all());
+        $this->assertSame([$ids[2], $ids[1]], (clone $query)->offset(1)->get()->pluck('id')->all());
+        $this->assertSame([$ids[2]], (clone $query)->offset(1)->limit(1)->get()->pluck('id')->all());
+    }
+
+    #[Test]
+    public function it_preserves_ordered_union_bindings_aliases_and_builder_state()
+    {
+        $ids = $this->createUnionOrderingFixture();
+        $part = DB::table('orders')->selectRaw('"id", "price" + CAST(? AS INTEGER) as "adjusted"', [20])
+            ->where('price', 100)->orderByRaw('"id" + CAST(? AS INTEGER)', [2])->limit(1);
+        $query = DB::table('orders')->selectRaw('"id", "price" + CAST(? AS INTEGER) as "adjusted"', [10])
+            ->where('price', 16)->orderByRaw('"price" + CAST(? AS INTEGER)', [1])->limit(1)
+            ->union($part)->orderByRaw('CASE WHEN "adjusted" > ? THEN 0 ELSE 1 END', [50])
+            ->orderBy('id')->offset(0)->limit(2);
+        $before = get_object_vars($query);
+        $partBefore = get_object_vars($part);
+        $bindings = [10, 16, 1, 20, 100, 2, 50];
+        $this->assertSame($bindings, $query->getBindings());
+        $sql = $query->toSql();
+        $this->assertSame($sql, $query->toSql());
+        $this->assertSame($before, get_object_vars($query));
+        $this->assertSame($partBefore, get_object_vars($part));
+        $rows = $query->get();
+        $this->assertSame([$ids[1], $ids[4]], $rows->pluck('id')->all());
+        $this->assertSame([120, 26], $rows->pluck('adjusted')->all());
+        $this->assertSame($bindings, $query->getBindings());
+        $this->assertSame($sql, $query->toSql());
+    }
+
+    #[Test]
+    public function it_counts_globally_ordered_unions_without_changing_the_builder()
+    {
+        $this->createUnionOrderingFixture();
+        $query = DB::table('orders')->where('price', 16)
+            ->union(DB::table('orders')->where('price', 100))
+            ->orderByRaw('CASE WHEN "price" = ? THEN 0 ELSE 1 END', [100]);
+        $sql = $query->toSql();
+        $bindings = $query->getBindings();
+        $this->assertSame(3, $query->count());
+        $this->assertSame(3, (clone $query)->offset(1)->limit(1)->getCountForPagination());
+        $this->assertSame($sql, $query->toSql());
+        $this->assertSame($bindings, $query->getBindings());
+        $this->assertCount(3, $query->get());
+    }
+
+    private function createUnionOrderingFixture(): array
+    {
+        return Order::factory()->forEachSequence(
+            ['price' => 110], ['price' => 100], ['price' => 100], ['price' => 80], ['price' => 16],
+        )->create()->pluck('id')->all();
     }
 
     #[Test]
