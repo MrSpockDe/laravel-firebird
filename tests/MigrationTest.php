@@ -13,6 +13,136 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    public function it_runs_a_representative_users_and_posts_migration_lifecycle()
+    {
+        try {
+            $this->createSmokeMigrationTables();
+            $this->assertTrue(Schema::hasTable('smoke_users'));
+            $this->assertTrue(Schema::hasTable('smoke_posts'));
+            $users = array_column(Schema::getColumns('smoke_users'), null, 'name');
+            $posts = array_column(Schema::getColumns('smoke_posts'), null, 'name');
+            $this->assertSame(['id', 'name', 'email', 'email_verified_at', 'password', 'remember_token', 'created_at', 'updated_at'], array_keys($users));
+            $this->assertSame(['id', 'user_id', 'title', 'body', 'published', 'published_at', 'deleted_at', 'created_at', 'updated_at'], array_keys($posts));
+            $this->assertTrue($users['id']['auto_increment']);
+            $this->assertTrue($posts['id']['auto_increment']);
+            $this->assertFalse($posts['user_id']['auto_increment']);
+            $this->assertSame('bigint', $posts['user_id']['type_name']);
+            $this->assertSame('boolean', $posts['published']['type_name']);
+            $this->assertSame('blob', $posts['body']['type_name']);
+            foreach (['email_verified_at', 'remember_token', 'created_at', 'updated_at'] as $column) {
+                $this->assertTrue($users[$column]['nullable']);
+            }
+            foreach (['published_at', 'deleted_at', 'created_at', 'updated_at'] as $column) {
+                $this->assertSame('timestamp', $posts[$column]['type_name']);
+                $this->assertTrue($posts[$column]['nullable']);
+            }
+            $this->assertTrue(Schema::hasIndex('smoke_users', ['id'], 'primary'));
+            $this->assertTrue(Schema::hasIndex('smoke_users', ['email'], 'unique'));
+            $this->assertTrue(Schema::hasIndex('smoke_posts', ['id'], 'primary'));
+            $this->assertTrue(Schema::hasIndex('smoke_posts', ['title']));
+            $this->assertForeignKeyDefinition('smoke_posts', ['user_id'], 'smoke_users', ['id']);
+            $this->assertSame('cascade', Schema::getForeignKeys('smoke_posts')[0]['on_delete']);
+
+            $user = ['name' => 'Ada', 'email' => 'ada@example.test', 'password' => 'test-password-hash'];
+            $userId = DB::table('smoke_users')->insertGetId($user);
+            $this->assertIsInt($userId);
+            $this->assertGreaterThan(0, $userId);
+            $post = ['user_id' => $userId, 'title' => 'First post', 'body' => 'A complete migration lifecycle.'];
+            $postId = DB::table('smoke_posts')->insertGetId($post);
+            $this->assertIsInt($postId);
+            $this->assertGreaterThan(0, $postId);
+            $saved = DB::table('smoke_posts')->where('id', $postId)->first();
+            $this->assertSame($userId, $saved->user_id);
+            $this->assertSame($post['body'], $saved->body);
+            $this->assertFalse($saved->published);
+            $this->assertSame('Ada', DB::table('smoke_users')->where('id', $userId)->value('name'));
+            $this->assertSame(1, DB::table('smoke_posts')->where('id', $postId)->update([
+                'title' => 'Published post', 'published' => true, 'published_at' => '2026-01-15 12:34:56',
+            ]));
+            $saved = DB::table('smoke_posts')->where('id', $postId)->first();
+            $this->assertSame('Published post', $saved->title);
+            $this->assertTrue($saved->published);
+            $this->assertSame('2026-01-15 12:34:56', $saved->published_at);
+
+            try {
+                DB::table('smoke_users')->insert($user);
+                $this->fail('The email UNIQUE constraint must reject a duplicate user.');
+            } catch (QueryException $exception) {
+                $this->assertSame(-803, $exception->errorInfo[1]);
+            }
+            $this->assertSame(1, DB::table('smoke_users')->count());
+            $this->assertRejectedForeignKeyInsert('smoke_posts', array_replace($post, ['user_id' => $userId + 1000]));
+            $this->assertSame(1, DB::table('smoke_users')->where('id', $userId)->delete());
+            $this->assertSame(0, DB::table('smoke_posts')->count());
+            $this->assertSame(0, DB::table('smoke_users')->count());
+
+            // Release cascade requests, then perform the migration's down order.
+            DB::disconnect();
+            Schema::drop('smoke_posts');
+            $this->assertFalse(Schema::hasTable('smoke_posts'));
+            $this->assertTrue(Schema::hasTable('smoke_users'));
+            Schema::drop('smoke_users');
+            $this->assertFalse(Schema::hasTable('smoke_users'));
+        } finally {
+            DB::disconnect();
+            Schema::dropIfExists('smoke_posts');
+            Schema::dropIfExists('smoke_users');
+        }
+    }
+
+    #[Test]
+    public function it_saves_and_reloads_an_eloquent_model_on_the_smoke_schema()
+    {
+        try {
+            $this->createSmokeMigrationTables();
+            $model = new IdentityTestModel;
+            $model->setTable('smoke_users');
+            $model->timestamps = true;
+            $model->forceFill(['name' => 'Grace', 'email' => 'grace@example.test', 'password' => 'test-password-hash']);
+            $this->assertTrue($model->save());
+            $this->assertIsInt($model->getKey());
+            $this->assertGreaterThan(0, $model->getKey());
+            $reloaded = $model->newQuery()->findOrFail($model->getKey());
+            $this->assertSame($model->getKey(), $reloaded->getKey());
+            foreach (['name', 'email', 'password'] as $attribute) {
+                $this->assertSame($model->{$attribute}, $reloaded->{$attribute});
+            }
+            $this->assertNotNull($reloaded->created_at);
+            $this->assertNotNull($reloaded->updated_at);
+            $this->assertSame(1, DB::table('smoke_users')->count());
+        } finally {
+            Schema::dropIfExists('smoke_posts');
+            Schema::dropIfExists('smoke_users');
+        }
+    }
+
+    private function createSmokeMigrationTables(): void
+    {
+        // Isolate these tables from the shared users/orders fixtures in other tests.
+        Schema::dropIfExists('smoke_posts');
+        Schema::dropIfExists('smoke_users');
+        Schema::create('smoke_users', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->timestamp('email_verified_at')->nullable();
+            $table->string('password');
+            $table->rememberToken();
+            $table->timestamps();
+        });
+        Schema::create('smoke_posts', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained('smoke_users')->cascadeOnDelete();
+            $table->string('title')->index();
+            $table->text('body');
+            $table->boolean('published')->default(false);
+            $table->timestamp('published_at')->nullable();
+            $table->softDeletes();
+            $table->timestamps();
+        });
+    }
+
+    #[Test]
     #[DataProvider('convenienceColumnHelpers')]
     public function it_creates_and_drops_convenience_columns(string $method, string $dropMethod, array $names, string $type, int $fieldType, ?int $length, string $value)
     {
