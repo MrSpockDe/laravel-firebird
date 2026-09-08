@@ -73,6 +73,16 @@ class FirebirdGrammar extends Grammar
         return $sql;
     }
 
+    /** {@inheritDoc} */
+    protected function compileLock(Builder $query, $value)
+    {
+        if ($value === false) {
+            throw new \LogicException('This database driver does not support shared locks.');
+        }
+
+        return $value === true ? 'for update with lock' : $value;
+    }
+
     /**
      * Compile the "limit" portions of the query.
      *
