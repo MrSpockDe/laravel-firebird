@@ -21,6 +21,7 @@ class LockingTest extends TestCase
     {
         $table = 'row_lock_test';
         $a = $b = null;
+        $bTransactionOpen = false;
         Schema::dropIfExists($table);
 
         try {
@@ -40,9 +41,10 @@ class LockingTest extends TestCase
             $a->getPdo()->setAttribute(PDO::ATTR_AUTOCOMMIT, false);
             $a->beginTransaction();
             // PDO has no NO WAIT attribute. Use an explicit Firebird transaction
-            // with autocommit disabled, and close this nonpersistent PDO to roll back.
+            // with autocommit disabled, and explicitly roll it back before disconnecting.
             $b->getPdo()->setAttribute(PDO::ATTR_AUTOCOMMIT, false);
             $b->statement('SET TRANSACTION READ WRITE ISOLATION LEVEL READ COMMITTED NO WAIT');
+            $bTransactionOpen = true;
 
             $attachmentSql = 'select CURRENT_CONNECTION as "id" from RDB$DATABASE';
             $this->assertNotSame($a->selectOne($attachmentSql)->id, $b->selectOne($attachmentSql)->id);
@@ -90,21 +92,29 @@ class LockingTest extends TestCase
                 $b->table($table)->where('id', 1)->value('value')
             );
 
+            $b->statement('ROLLBACK WORK');
+            $bTransactionOpen = false;
             $b->disconnect();
             $this->assertSame([1 => 'Original', 2 => 'Outside'],
                 DB::table($table)->orderBy('id')->pluck('value', 'id')->all());
             $this->assertSame($shouldLock, $conflict !== null,
                 'Connection B must encounter a lock conflict exactly when A requested a row lock.');
         } finally {
-            // Disconnect also rolls back the SQL-managed NO WAIT transaction.
-            $b?->disconnect();
             try {
-                if ($a !== null && $a->transactionLevel() > 0) {
-                    $a->rollBack();
+                if ($bTransactionOpen) {
+                    $b->statement('ROLLBACK WORK');
+                    $bTransactionOpen = false;
                 }
             } finally {
-                $a?->disconnect();
-                Schema::dropIfExists($table);
+                $b?->disconnect();
+                try {
+                    if ($a !== null && $a->transactionLevel() > 0) {
+                        $a->rollBack();
+                    }
+                } finally {
+                    $a?->disconnect();
+                    Schema::dropIfExists($table);
+                }
             }
         }
     }
