@@ -37,6 +37,7 @@ class LockingTest extends TestCase
             $a = new FirebirdConnection($connector->connect($config), $config['database'], '', $config);
             $b = new FirebirdConnection($connector->connect($config), $config['database'], '', $config);
 
+            $a->getPdo()->setAttribute(PDO::ATTR_AUTOCOMMIT, false);
             $a->beginTransaction();
             // PDO has no NO WAIT attribute. Use an explicit Firebird transaction
             // with autocommit disabled, and close this nonpersistent PDO to roll back.
