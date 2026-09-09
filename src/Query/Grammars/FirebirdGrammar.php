@@ -267,6 +267,37 @@ class FirebirdGrammar extends Grammar
         return $sql;
     }
 
+    /** {@inheritDoc} */
+    public function compileInsert(Builder $query, array $values)
+    {
+        $first = reset($values);
+        if (count($values) <= 1 || ! is_array($first)) {
+            return parent::compileInsert($query, $values);
+        }
+
+        $table = $this->wrapTable($query->from);
+        $columns = array_keys($first);
+        $selects = [];
+
+        foreach ($values as $row) {
+            if ($columns === [] || array_keys($row) !== $columns) {
+                throw new \LogicException('Batch inserts require the same non-empty column list in every row.');
+            }
+
+            $parameters = [];
+            foreach ($row as $column => $value) {
+                if ($this->isExpression($value)) {
+                    throw new \LogicException('Raw expressions are not supported in batch inserts.');
+                }
+                $parameters[] = 'cast('.$this->parameter($value).' as type of column '
+                    .$table.'.'.$this->wrap($column).')';
+            }
+            $selects[] = 'select '.implode(', ', $parameters).' from rdb$database';
+        }
+
+        return 'insert into '.$table.' ('.$this->columnize($columns).') '.implode(' union all ', $selects);
+    }
+
     /**
      * Compile an insert and get ID statement into SQL.
      *
