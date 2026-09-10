@@ -279,6 +279,10 @@ class FirebirdGrammar extends Grammar
             throw new \LogicException('Firebird does not support changing column collations.');
         }
 
+        if (array_key_exists('charset', $column->getAttributes())) {
+            throw new \LogicException('Firebird does not support changing column character sets.');
+        }
+
         $sql = 'ALTER TABLE '.$this->wrapTable($blueprint).' ALTER COLUMN '.$this->wrap($column);
 
         $statements = [
