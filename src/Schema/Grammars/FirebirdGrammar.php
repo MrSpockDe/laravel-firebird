@@ -275,6 +275,10 @@ class FirebirdGrammar extends Grammar
     public function compileChange(Blueprint $blueprint, Fluent $command)
     {
         $column = $command->column;
+        if (array_key_exists('collation', $column->getAttributes())) {
+            throw new \LogicException('Firebird does not support changing column collations.');
+        }
+
         $sql = 'ALTER TABLE '.$this->wrapTable($blueprint).' ALTER COLUMN '.$this->wrap($column);
 
         $statements = [
