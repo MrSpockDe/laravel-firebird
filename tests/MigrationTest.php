@@ -13,6 +13,94 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    #[DataProvider('collationColumnDefinitions')]
+    public function it_applies_collation_modifiers(string $operation, bool $nullable, bool $hasDefault)
+    {
+        $name = 'collation_modifier_test';
+        Schema::dropIfExists($name);
+
+        try {
+            $define = function (Blueprint $table) use ($nullable, $hasDefault) {
+                $column = $table->string('value', 40)->charset('UTF8')->collation('UNICODE_CI');
+                if ($nullable) {
+                    $column->nullable();
+                }
+                if ($hasDefault) {
+                    $column->default('hello');
+                }
+            };
+
+            Schema::create($name, function (Blueprint $table) use ($operation, $define) {
+                $table->id();
+                if ($operation === 'create') {
+                    $define($table);
+                }
+            });
+            if ($operation === 'add') {
+                Schema::table($name, $define);
+            }
+
+            $column = array_column(Schema::getColumns($name), null, 'name')['value'];
+            $this->assertSame('varchar', $column['type_name']);
+            $this->assertSame('varchar(40)', $column['type']);
+            $this->assertSame('UNICODE_CI', $column['collation']);
+            $this->assertSame($nullable, $column['nullable']);
+            $this->assertSame($hasDefault ? "'hello'" : null, $column['default']);
+
+            $id = DB::table($name)->insertGetId(['value' => 'written']);
+            $this->assertSame('written', DB::table($name)->where('id', $id)->value('value'));
+            if ($hasDefault) {
+                $id = DB::table($name)->insertGetId([]);
+                $this->assertSame('hello', DB::table($name)->where('id', $id)->value('value'));
+            }
+            if ($nullable) {
+                $id = DB::table($name)->insertGetId(['value' => null]);
+                $this->assertNull(DB::table($name)->where('id', $id)->value('value'));
+            }
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function collationColumnDefinitions(): iterable
+    {
+        foreach (['create', 'add'] as $operation) {
+            yield "$operation not null" => [$operation, false, false];
+            yield "$operation nullable" => [$operation, true, false];
+            yield "$operation default not null" => [$operation, false, true];
+            yield "$operation default nullable" => [$operation, true, true];
+        }
+    }
+
+    #[Test]
+    public function it_preserves_modifiers_without_collation()
+    {
+        $name = 'no_collation_modifier_test';
+        Schema::dropIfExists($name);
+
+        try {
+            $migration = function () use ($name) {
+                Schema::create($name, function (Blueprint $table) {
+                    $table->string('value', 40)->charset('UTF8')->default('hello');
+                });
+            };
+            $this->assertSame(
+                'create table "no_collation_modifier_test" ("value" VARCHAR(40) CHARACTER SET UTF8 DEFAULT \'hello\' NOT NULL)',
+                DB::pretend($migration)[0]['query']
+            );
+            $migration();
+            $column = array_column(Schema::getColumns($name), null, 'name')['value'];
+            $this->assertSame('varchar(40)', $column['type']);
+            $this->assertFalse($column['nullable']);
+            $this->assertSame("'hello'", $column['default']);
+            DB::table($name)->insert(['value' => DB::raw('DEFAULT')]);
+            $this->assertSame('hello', DB::table($name)->value('value'));
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    #[Test]
     #[DataProvider('booleanChangeDefaults')]
     public function it_changes_boolean_defaults(?bool $initial, ?bool $default, bool $specified)
     {

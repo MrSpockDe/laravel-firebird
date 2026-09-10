@@ -13,7 +13,7 @@ class FirebirdGrammar extends Grammar
      *
      * @var array
      */
-    protected $modifiers = ['Charset', 'Collate', 'Increment', 'Default', 'Nullable'];
+    protected $modifiers = ['Charset', 'Increment', 'Default', 'Nullable', 'Collate'];
 
     /**
      * The columns available as serials.
