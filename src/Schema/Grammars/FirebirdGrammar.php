@@ -288,7 +288,7 @@ class FirebirdGrammar extends Grammar
         if (array_key_exists('default', $column->getAttributes())) {
             $statements[] = $sql.(is_null($column->default)
                 ? ' DROP DEFAULT'
-                : ' SET DEFAULT '.$this->getDefaultValue($column->default));
+                : ' SET'.$this->modifyDefault($blueprint, $column));
         }
 
         return $statements;
