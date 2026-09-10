@@ -13,6 +13,99 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    #[DataProvider('unsupportedChangeCollations')]
+    public function it_rejects_explicit_change_collation(?string $collation, bool $charset, int $length, bool $nullable)
+    {
+        $name = 'change_collation_test';
+        Schema::dropIfExists($name);
+
+        try {
+            Schema::create($name, function (Blueprint $table) use ($nullable) {
+                $table->id();
+                $table->string('value', 40)->charset('UTF8')->collation('UNICODE')
+                    ->nullable($nullable)->default('Hello');
+            });
+            $id = DB::table($name)->insertGetId(['value' => 'Alpha']);
+            $before = Schema::getColumns($name);
+            $beforeCharset = $this->readChangeCollationCharset($name);
+            $exception = null;
+
+            try {
+                Schema::table($name, function (Blueprint $table) use ($collation, $charset, $length) {
+                    $column = $table->string('value', $length)->collation($collation)->change();
+                    if ($charset) {
+                        $column->charset('UTF8');
+                    }
+                });
+            } catch (\LogicException $caught) {
+                $exception = $caught;
+            }
+
+            $this->assertInstanceOf(\LogicException::class, $exception);
+            $this->assertSame('Firebird does not support changing column collations.', $exception->getMessage());
+            $this->assertSame($before, Schema::getColumns($name));
+            $this->assertSame($beforeCharset, $this->readChangeCollationCharset($name));
+            $this->assertSame('Alpha', DB::table($name)->where('id', $id)->value('value'));
+            $defaultId = DB::table($name)->insertGetId([]);
+            $this->assertSame('Hello', DB::table($name)->where('id', $defaultId)->value('value'));
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function unsupportedChangeCollations(): iterable
+    {
+        yield 'without charset' => ['UNICODE_CI', false, 40, true];
+        yield 'with charset' => ['UNICODE_CI', true, 40, true];
+        yield 'length change nullable default' => ['UNICODE_CI', false, 100, true];
+        yield 'length change not null default' => ['UNICODE_CI', false, 100, false];
+        yield 'incompatible collation' => ['ASCII', true, 100, true];
+        yield 'explicit null' => [null, false, 100, true];
+        yield 'same collation' => ['UNICODE', false, 100, true];
+    }
+
+    #[Test]
+    public function it_changes_length_preserving_collation_attributes()
+    {
+        $name = 'change_collation_test';
+        Schema::dropIfExists($name);
+
+        try {
+            Schema::create($name, function (Blueprint $table) {
+                $table->id();
+                $table->string('value', 40)->charset('UTF8')->collation('UNICODE')
+                    ->nullable()->default('Hello');
+            });
+            $id = DB::table($name)->insertGetId(['value' => 'Alpha']);
+            $expected = array_column(Schema::getColumns($name), null, 'name')['value'];
+            $expected['type'] = 'varchar(100)';
+
+            Schema::table($name, fn (Blueprint $table) => $table->string('value', 100)->change());
+
+            $this->assertSame($expected, array_column(Schema::getColumns($name), null, 'name')['value']);
+            $this->assertSame('UTF8', $this->readChangeCollationCharset($name));
+            $this->assertSame('Alpha', DB::table($name)->where('id', $id)->value('value'));
+            $defaultId = DB::table($name)->insertGetId([]);
+            $this->assertSame('Hello', DB::table($name)->where('id', $defaultId)->value('value'));
+            $nullId = DB::table($name)->insertGetId(['value' => null]);
+            $this->assertNull(DB::table($name)->where('id', $nullId)->value('value'));
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    private function readChangeCollationCharset(string $table): string
+    {
+        return DB::selectOne(<<<'SQL'
+            SELECT TRIM(cs.RDB$CHARACTER_SET_NAME) AS "charset"
+            FROM RDB$RELATION_FIELDS rf
+            JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = rf.RDB$FIELD_SOURCE
+            JOIN RDB$CHARACTER_SETS cs ON cs.RDB$CHARACTER_SET_ID = f.RDB$CHARACTER_SET_ID
+            WHERE rf.RDB$RELATION_NAME = ? AND rf.RDB$FIELD_NAME = 'value'
+        SQL, [$table])->charset;
+    }
+
+    #[Test]
     #[DataProvider('collationColumnDefinitions')]
     public function it_applies_collation_modifiers(string $operation, bool $nullable, bool $hasDefault)
     {
