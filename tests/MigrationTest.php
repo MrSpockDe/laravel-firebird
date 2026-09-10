@@ -13,6 +13,136 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    #[DataProvider('booleanChangeDefaults')]
+    public function it_changes_boolean_defaults(?bool $initial, ?bool $default, bool $specified)
+    {
+        $name = 'boolean_change_default_test';
+        Schema::dropIfExists($name);
+        try {
+            Schema::create($name, function (Blueprint $table) use ($initial) {
+                $table->id();
+                $column = $table->boolean('flag')->nullable();
+                if ($initial !== null) {
+                    $column->default($initial);
+                }
+            });
+            $existingId = DB::table($name)->insertGetId([]);
+            $migration = function () use ($name, $default, $specified) {
+                Schema::table($name, function (Blueprint $table) use ($default, $specified) {
+                    $column = $table->boolean('flag')->nullable()->change();
+                    if ($specified) {
+                        $column->default($default);
+                    }
+                });
+            };
+            if (! $specified) {
+                $sql = implode(' ', array_column(DB::pretend($migration), 'query'));
+                $this->assertStringNotContainsString(' DEFAULT', strtoupper($sql));
+            }
+            $migration();
+            $expected = $specified ? $default : $initial;
+            $id = DB::table($name)->insertGetId([]);
+            $columns = array_column(Schema::getColumns($name), null, 'name');
+            $this->assertSame($expected === null ? null : ($expected ? 'TRUE' : 'FALSE'), $columns['flag']['default']);
+            $this->assertSame($expected, DB::table($name)->where('id', $id)->value('flag'));
+            $this->assertSame($initial, DB::table($name)->where('id', $existingId)->value('flag'));
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function booleanChangeDefaults(): iterable
+    {
+        yield 'set true' => [null, true, true];
+        yield 'set false' => [null, false, true];
+        yield 'true to false' => [true, false, true];
+        yield 'false to true' => [false, true, true];
+        yield 'preserve true' => [true, null, false];
+        yield 'preserve false' => [false, null, false];
+        yield 'remove true' => [true, null, true];
+        yield 'remove false' => [false, null, true];
+    }
+
+    #[Test]
+    #[DataProvider('booleanCreateAndAddDefaults')]
+    public function it_preserves_boolean_defaults_on_create_and_add(string $operation, bool $default)
+    {
+        $name = 'boolean_create_add_default_test';
+        Schema::dropIfExists($name);
+        try {
+            Schema::create($name, function (Blueprint $table) use ($operation, $default) {
+                $table->id();
+                if ($operation === 'create') {
+                    $table->boolean('flag')->default($default);
+                }
+            });
+            if ($operation === 'add') {
+                Schema::table($name, fn (Blueprint $table) => $table->boolean('flag')->default($default));
+            }
+            $columns = array_column(Schema::getColumns($name), null, 'name');
+            $this->assertSame($default ? 'TRUE' : 'FALSE', $columns['flag']['default']);
+            $this->assertFalse($columns['flag']['nullable']);
+            $id = DB::table($name)->insertGetId([]);
+            $this->assertSame($default, DB::table($name)->where('id', $id)->value('flag'));
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function booleanCreateAndAddDefaults(): iterable
+    {
+        foreach (['create', 'add'] as $operation) {
+            yield $operation.' true' => [$operation, true];
+            yield $operation.' false' => [$operation, false];
+        }
+    }
+
+    #[Test]
+    #[DataProvider('nonBooleanChangeDefaults')]
+    public function it_preserves_non_boolean_change_defaults(string $type, $default, string $source, $expected)
+    {
+        $name = 'other_change_default_test';
+        Schema::dropIfExists($name);
+        try {
+            Schema::create($name, function (Blueprint $table) use ($type) {
+                $table->id();
+                $type === 'decimal'
+                    ? $table->decimal('value', 10, 2)->nullable()
+                    : $table->{$type}('value')->nullable();
+            });
+            Schema::table($name, function (Blueprint $table) use ($type, $default) {
+                $column = $type === 'decimal' ? $table->decimal('value', 10, 2) : $table->{$type}('value');
+                $column->default($type === 'timestamp' ? DB::raw($default) : $default)->change();
+            });
+            $columns = array_column(Schema::getColumns($name), null, 'name');
+            $this->assertSame($source, $columns['value']['default']);
+            if ($type === 'timestamp') {
+                $before = DB::selectOne('select cast(current_timestamp as timestamp) as "now" from rdb$database')->now;
+            }
+            $id = DB::table($name)->insertGetId([]);
+            $actual = DB::table($name)->where('id', $id)->value('value');
+            if ($type === 'timestamp') {
+                $after = DB::selectOne('select cast(current_timestamp as timestamp) as "now" from rdb$database')->now;
+                $this->assertNotNull($actual);
+                $this->assertGreaterThanOrEqual($before, $actual);
+                $this->assertLessThanOrEqual($after, $actual);
+            } else {
+                $this->assertSame($expected, $type === 'decimal' ? (string) $actual : $actual);
+            }
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function nonBooleanChangeDefaults(): iterable
+    {
+        yield 'integer' => ['integer', 2, "'2'", 2];
+        yield 'decimal' => ['decimal', '2.75', "'2.75'", '2.75'];
+        yield 'apostrophe' => ['string', "it's fine", "'it''s fine'", "it's fine"];
+        yield 'expression' => ['timestamp', 'CURRENT_TIMESTAMP', 'CURRENT_TIMESTAMP', null];
+    }
+
+    #[Test]
     public function it_runs_a_representative_users_and_posts_migration_lifecycle()
     {
         try {
