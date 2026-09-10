@@ -13,6 +13,78 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    #[DataProvider('dropIfExistsPrefixCases')]
+    public function it_drops_tables_with_consistent_prefix_names(string $prefix, string $name, bool $exists, bool $unprefixed, bool $conditional)
+    {
+        $connection = DB::connection();
+        $originalPrefix = $connection->getTablePrefix();
+        $physical = $prefix.$name;
+        $physicalExists = fn (string $table) => (bool) $connection->selectOne(
+            'SELECT 1 AS "present" FROM RDB$RELATIONS WHERE RDB$RELATION_NAME = ?', [$table]
+        );
+
+        try {
+            $connection->setTablePrefix('');
+            Schema::dropIfExists($physical);
+            if ($unprefixed) {
+                Schema::dropIfExists($name);
+                Schema::create($name, fn (Blueprint $table) => $table->integer('id'));
+                DB::table($name)->insert(['id' => 73]);
+            }
+
+            $connection->setTablePrefix($prefix);
+            if ($exists) {
+                Schema::create($name, fn (Blueprint $table) => $table->integer('id'));
+                $this->assertTrue($physicalExists($physical));
+            }
+
+            $drop = fn () => $conditional ? Schema::dropIfExists($name) : Schema::drop($name);
+            $sql = $connection->pretend($drop)[0]['query'];
+            $drop();
+
+            $this->assertFalse($physicalExists($physical));
+            $identifier = '"'.str_replace('"', '""', $physical).'"';
+            $this->assertStringContainsString('drop table '.$identifier, $sql);
+            if ($conditional) {
+                $this->assertStringContainsString("rdb\$relation_name = '".$physical."'", $sql);
+            }
+            if ($prefix !== '') {
+                $this->assertStringNotContainsString($prefix.$prefix.$name, $sql);
+            }
+
+            if ($unprefixed) {
+                $this->assertTrue($physicalExists($name));
+                $connection->setTablePrefix('');
+                $this->assertSame(73, DB::table($name)->value('id'));
+            }
+        } finally {
+            $connection->setTablePrefix('');
+            try {
+                if ($physicalExists($physical)) {
+                    Schema::drop($physical);
+                }
+                if ($unprefixed && $physicalExists($name)) {
+                    Schema::drop($name);
+                }
+            } finally {
+                $connection->setTablePrefix($originalPrefix);
+            }
+        }
+    }
+
+    public static function dropIfExistsPrefixCases(): iterable
+    {
+        yield 'existing prefixed' => ['fb_', 'prefix_drop_test', true, false, true];
+        yield 'missing prefixed' => ['fb_', 'prefix_drop_test', false, false, true];
+        yield 'both tables exist' => ['fb_', 'prefix_drop_test', true, true, true];
+        yield 'only unprefixed exists' => ['fb_', 'prefix_drop_test', false, true, true];
+        yield 'mixed case' => ['fb_', 'PrefixDropTest', true, false, true];
+        yield 'embedded quote' => ['fb_', 'prefix"drop_test', true, false, true];
+        yield 'without prefix' => ['', 'prefix_drop_test', true, false, true];
+        yield 'unconditional drop' => ['fb_', 'prefix_drop_test', true, false, false];
+    }
+
+    #[Test]
     #[DataProvider('unsupportedChangeCharsets')]
     public function it_rejects_explicit_change_charset(string $initial, ?string $target, int $length, bool $nullable, string $value)
     {

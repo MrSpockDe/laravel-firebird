@@ -243,11 +243,14 @@ class FirebirdGrammar extends Grammar
      */
     public function compileDropIfExists(Blueprint $blueprint, Fluent $command)
     {
+        $table = $this->wrapTable($blueprint);
+        $name = str_replace('""', '"', substr($table, 1, -1));
+
         return sprintf(
             'execute block as begin if (exists(select 1 from rdb$relations where rdb$relation_name = %s and rdb$relation_type = 0 and '
             .'(rdb$system_flag is null or rdb$system_flag = 0))) then execute statement \'drop table %s\'; end',
-            $this->quoteString($blueprint->getTable()),
-            $this->wrapTable($blueprint)
+            $this->quoteString($name),
+            $table
         );
     }
 
