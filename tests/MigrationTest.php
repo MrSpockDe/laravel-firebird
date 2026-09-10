@@ -13,6 +13,54 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class MigrationTest extends TestCase
 {
     #[Test]
+    #[DataProvider('unsupportedChangeCharsets')]
+    public function it_rejects_explicit_change_charset(string $initial, ?string $target, int $length, bool $nullable, string $value)
+    {
+        $name = 'change_charset_test';
+        Schema::dropIfExists($name);
+
+        try {
+            Schema::create($name, function (Blueprint $table) use ($initial, $nullable) {
+                $table->id();
+                $table->string('value', 40)->charset($initial)
+                    ->collation($initial === 'UTF8' ? 'UNICODE' : 'ASCII')
+                    ->nullable($nullable)->default('Hello');
+            });
+            $id = DB::table($name)->insertGetId(['value' => $value]);
+            $before = Schema::getColumns($name);
+            $this->assertSame($initial, $this->readChangeCollationCharset($name));
+            $exception = null;
+
+            try {
+                Schema::table($name, fn (Blueprint $table) => $table->string('value', $length)->charset($target)->change());
+            } catch (\LogicException $caught) {
+                $exception = $caught;
+            }
+
+            $this->assertInstanceOf(\LogicException::class, $exception);
+            $this->assertSame('Firebird does not support changing column character sets.', $exception->getMessage());
+            $this->assertSame($before, Schema::getColumns($name));
+            $this->assertSame($initial, $this->readChangeCollationCharset($name));
+            $this->assertSame($value, DB::table($name)->where('id', $id)->value('value'));
+            $defaultId = DB::table($name)->insertGetId([]);
+            $this->assertSame('Hello', DB::table($name)->where('id', $defaultId)->value('value'));
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function unsupportedChangeCharsets(): iterable
+    {
+        yield 'different charset' => ['ASCII', 'UTF8', 40, true, 'Alpha'];
+        yield 'different charset and length' => ['ASCII', 'UTF8', 100, true, 'Alpha'];
+        yield 'same charset' => ['UTF8', 'UTF8', 40, true, 'Grüße'];
+        yield 'explicit null' => ['UTF8', null, 100, true, 'Grüße'];
+        yield 'nullable default' => ['UTF8', 'ASCII', 100, true, 'Alpha'];
+        yield 'not null default' => ['UTF8', 'ASCII', 100, false, 'Alpha'];
+        yield 'unicode data' => ['UTF8', 'ASCII', 100, true, 'Grüße 😀'];
+    }
+
+    #[Test]
     #[DataProvider('unsupportedChangeCollations')]
     public function it_rejects_explicit_change_collation(?string $collation, bool $charset, int $length, bool $nullable)
     {
