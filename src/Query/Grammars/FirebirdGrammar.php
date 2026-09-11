@@ -9,6 +9,18 @@ use Illuminate\Support\Str;
 
 class FirebirdGrammar extends Grammar
 {
+    /** {@inheritDoc} */
+    protected function compileUpdateWithJoins(Builder $query, $table, $columns, $where)
+    {
+        throw new \LogicException('Firebird does not support update operations with joins.');
+    }
+
+    /** {@inheritDoc} */
+    protected function compileDeleteWithJoins(Builder $query, $table, $where)
+    {
+        throw new \LogicException('Firebird does not support delete operations with joins.');
+    }
+
     /**
      * Compile a LIKE clause using Firebird's case mapping.
      */
