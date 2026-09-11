@@ -8,6 +8,31 @@ use Illuminate\Support\Fluent;
 
 class FirebirdGrammar extends Grammar
 {
+    /** @var array */
+    protected $fluentCommands = ['Comment'];
+
+    /**
+     * Compile an explicitly requested column comment as a separate command.
+     */
+    public function compileComment(Blueprint $blueprint, Fluent $command)
+    {
+        if (array_key_exists('comment', $command->column->getAttributes())) {
+            $comment = $command->column->comment;
+
+            return 'comment on column '.$this->wrapTable($blueprint).'.'.$this->wrap($command->column)
+                .' is '.(is_null($comment) ? 'NULL' : $this->quoteString(str_replace("'", "''", $comment)));
+        }
+    }
+
+    /**
+     * Compile a table comment as a separate command.
+     */
+    public function compileTableComment(Blueprint $blueprint, Fluent $command)
+    {
+        return 'comment on table '.$this->wrapTable($blueprint)
+            .' is '.(is_null($command->comment) ? 'NULL' : $this->quoteString(str_replace("'", "''", $command->comment)));
+    }
+
     /**
      * The possible column modifiers.
      *
@@ -47,7 +72,7 @@ class FirebirdGrammar extends Grammar
      */
     public function compileTables($schema)
     {
-        return 'select trim(trailing from rdb$relation_name) as "name" '
+        return 'select trim(trailing from rdb$relation_name) as "name", rdb$description as "comment" '
             .'from rdb$relations '
             .'where rdb$relation_type = 0 '
             .'and (rdb$system_flag is null or rdb$system_flag = 0) '
