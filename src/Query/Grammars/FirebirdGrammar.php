@@ -10,6 +10,12 @@ use Illuminate\Support\Str;
 class FirebirdGrammar extends Grammar
 {
     /** {@inheritDoc} */
+    public function compileTruncate(Builder $query)
+    {
+        throw new \LogicException('Firebird does not support truncate operations.');
+    }
+
+    /** {@inheritDoc} */
     protected function compileUpdateWithJoins(Builder $query, $table, $columns, $where)
     {
         throw new \LogicException('Firebird does not support update operations with joins.');
