@@ -759,7 +759,7 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeFloat(Fluent $column)
     {
-        return 'FLOAT';
+        return is_null($column->precision) ? 'FLOAT' : "FLOAT({$column->precision})";
     }
 
     /**
