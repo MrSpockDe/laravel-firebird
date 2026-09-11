@@ -8,6 +8,37 @@ use Illuminate\Support\Fluent;
 
 class FirebirdGrammar extends Grammar
 {
+    /** {@inheritDoc} */
+    protected function getColumn(Blueprint $blueprint, $column)
+    {
+        if (! array_key_exists('virtualAs', $column->getAttributes())) {
+            return parent::getColumn($blueprint, $column);
+        }
+
+        if (is_null($column->virtualAs)) {
+            throw new \LogicException('Firebird computed columns require an expression.');
+        }
+
+        foreach (['default', 'collation', 'storedAs', 'generatedAs', 'charset'] as $modifier) {
+            if (array_key_exists($modifier, $column->getAttributes())) {
+                throw new \LogicException("Firebird computed columns do not support the {$modifier} modifier.");
+            }
+        }
+
+        foreach (['autoIncrement', 'unsigned', 'primary', 'unique', 'index', 'spatialIndex'] as $modifier) {
+            if ($column->$modifier) {
+                throw new \LogicException("Firebird computed columns do not support the {$modifier} modifier.");
+            }
+        }
+
+        if (array_key_exists('nullable', $column->getAttributes()) && ! $column->nullable) {
+            throw new \LogicException('Firebird computed columns do not support NOT NULL.');
+        }
+
+        return $this->wrap($column).' '.$this->getType($column)
+            .' COMPUTED BY ('.$this->getValue($column->virtualAs).')';
+    }
+
     /** @var array */
     protected $fluentCommands = ['Comment'];
 
@@ -303,6 +334,10 @@ class FirebirdGrammar extends Grammar
     public function compileChange(Blueprint $blueprint, Fluent $command)
     {
         $column = $command->column;
+        if (array_key_exists('virtualAs', $column->getAttributes())) {
+            throw new \LogicException('Firebird does not support changing computed columns through virtualAs().');
+        }
+
         if (array_key_exists('collation', $column->getAttributes())) {
             throw new \LogicException('Firebird does not support changing column collations.');
         }
