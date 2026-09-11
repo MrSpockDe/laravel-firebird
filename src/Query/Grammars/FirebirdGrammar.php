@@ -10,6 +10,21 @@ use Illuminate\Support\Str;
 class FirebirdGrammar extends Grammar
 {
     /**
+     * Compile a LIKE clause using Firebird's case mapping.
+     */
+    protected function whereLike(Builder $query, $where)
+    {
+        if ($where['caseSensitive']) {
+            return parent::whereLike($query, $where);
+        }
+
+        $operator = $where['not'] ? ' NOT LIKE ' : ' LIKE ';
+
+        return 'UPPER('.$this->wrap($where['column']).')'.$operator
+            .'UPPER('.$this->parameter($where['value']).')';
+    }
+
+    /**
      * The components that make up a select clause.
      *
      * @var string[]
