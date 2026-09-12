@@ -403,7 +403,11 @@ class FirebirdGrammar extends Grammar
     {
         $columns = $this->columnize($command->columns);
 
-        return 'ALTER TABLE '.$this->wrapTable($blueprint)." ADD PRIMARY KEY ({$columns})";
+        $constraint = $command->firebirdGeneratedName === false
+            ? 'CONSTRAINT '.$this->wrap($this->normalizeIndexName($command)).' '
+            : '';
+
+        return 'ALTER TABLE '.$this->wrapTable($blueprint)." ADD {$constraint}PRIMARY KEY ({$columns})";
     }
 
     /**
