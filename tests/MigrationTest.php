@@ -1962,7 +1962,7 @@ class MigrationTest extends TestCase
             SQL);
 
             $this->assertNotNull($object);
-            $this->assertSame(substr($generatedName, 0, 31), $object->object_name);
+            $this->assertSame($generatedName, $object->object_name);
 
             Schema::table('drop_long_index_test', function (Blueprint $table) {
                 $table->dropIndex(['long_identifier_value']);
@@ -2004,7 +2004,7 @@ class MigrationTest extends TestCase
             SQL);
 
             $this->assertNotNull($object);
-            $this->assertSame(substr($generatedName, 0, 31), $object->object_name);
+            $this->assertSame($generatedName, $object->object_name);
 
             Schema::table('drop_long_unique_test', function (Blueprint $table) {
                 $table->dropUnique(['long_identifier_value']);
