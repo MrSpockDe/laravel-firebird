@@ -417,7 +417,7 @@ class FirebirdGrammar extends Grammar
     {
         $table = $this->wrapTable($blueprint);
 
-        $index = $this->wrap(substr($command->index, 0, 31));
+        $index = $this->wrap($this->normalizeIndexName($command));
 
         $columns = $this->columnize($command->columns);
 
@@ -435,7 +435,7 @@ class FirebirdGrammar extends Grammar
     {
         $columns = $this->columnize($command->columns);
 
-        $index = $this->wrap(substr($command->index, 0, 31));
+        $index = $this->wrap($this->normalizeIndexName($command));
 
         $table = $this->wrapTable($blueprint);
 
@@ -469,7 +469,7 @@ class FirebirdGrammar extends Grammar
      */
     public function compileDropIndex(Blueprint $blueprint, Fluent $command)
     {
-        return 'DROP INDEX '.$this->wrap(substr($command->index, 0, 31));
+        return $this->compileDropNamedObject($blueprint, $command, 'INDEX');
     }
 
     /**
@@ -479,8 +479,7 @@ class FirebirdGrammar extends Grammar
      */
     public function compileDropUnique(Blueprint $blueprint, Fluent $command)
     {
-        return 'ALTER TABLE '.$this->wrapTable($blueprint)
-            .' DROP CONSTRAINT '.$this->wrap(substr($command->index, 0, 31));
+        return $this->compileDropNamedObject($blueprint, $command, 'UNIQUE');
     }
 
     /**
@@ -527,7 +526,7 @@ class FirebirdGrammar extends Grammar
 
         $onColumns = $this->columnize((array) $command->references);
 
-        $fkName = $this->normalizeForeignKeyName($command->index);
+        $fkName = $this->normalizeIndexName($command);
 
         $sql = "ALTER TABLE {$table} ADD CONSTRAINT {$fkName} ";
 
@@ -556,19 +555,87 @@ class FirebirdGrammar extends Grammar
      */
     public function compileDropForeign(Blueprint $blueprint, Fluent $command)
     {
-        $table = $this->wrapTable($blueprint);
-
-        $fkName = $this->normalizeForeignKeyName($command->index);
-
-        return "ALTER TABLE {$table} DROP CONSTRAINT {$fkName}";
+        return $this->compileDropNamedObject($blueprint, $command, 'FOREIGN KEY');
     }
 
     /**
-     * Apply the existing foreign key name length convention to create and drop.
+     * Preserve explicit identifiers and shorten generated names without splitting UTF-8.
      */
-    protected function normalizeForeignKeyName(string $name): string
+    protected function normalizeIndexName(Fluent $command): string
     {
-        return substr($name, 0, 31);
+        $name = $command->firebirdOriginalName ?? $command->index;
+
+        if (! mb_check_encoding($name, 'UTF-8')) {
+            throw new \LogicException('Firebird identifiers must be valid UTF-8.');
+        }
+
+        if (mb_strlen($name, 'UTF-8') <= 63) {
+            return $name;
+        }
+
+        if (! $command->firebirdGeneratedName) {
+            throw new \LogicException('Explicit Firebird identifiers must not exceed 63 Unicode characters.');
+        }
+
+        return mb_substr($name, 0, 46, 'UTF-8').'_'.substr(hash('sha256', $name), 0, 16);
+    }
+
+    /**
+     * Resolve names at execution time, including objects created earlier in the blueprint.
+     * Legacy matches require the exact ordered column list and the correct object type.
+     */
+    protected function compileDropNamedObject(Blueprint $blueprint, Fluent $command, string $type): string
+    {
+        $name = $this->normalizeIndexName($command);
+        $literal = static fn (string $value) => "'".str_replace("'", "''", $value)."'";
+        $table = $this->wrapTable($blueprint);
+        $physicalTable = str_replace('""', '"', substr($table, 1, -1));
+        $candidate = $type === 'FOREIGN KEY' ? strtoupper($name) : $name;
+        $relation = $literal($physicalTable);
+
+        if ($type === 'INDEX') {
+            $source = 'RDB$INDICES o';
+            $field = 'o.RDB$INDEX_NAME';
+            $index = $field;
+            $condition = "NOT EXISTS (SELECT 1 FROM RDB\$RELATION_CONSTRAINTS rc WHERE rc.RDB\$INDEX_NAME = o.RDB\$INDEX_NAME)";
+            $drop = 'DROP INDEX ';
+        } else {
+            $source = 'RDB$RELATION_CONSTRAINTS o';
+            $field = 'o.RDB$CONSTRAINT_NAME';
+            $index = 'o.RDB$INDEX_NAME';
+            $condition = 'o.RDB$CONSTRAINT_TYPE = '.$literal($type);
+            $drop = 'ALTER TABLE '.$table.' DROP CONSTRAINT ';
+        }
+
+        $base = "SELECT TRIM(TRAILING FROM {$field}) FROM {$source} WHERE o.RDB\$RELATION_NAME = {$relation} AND {$condition}";
+        $lookup = $base.' AND '.$field.' = '.$literal($candidate).' INTO :object_name;';
+        $legacy = substr($command->firebirdOriginalName ?? $command->index, 0, 31);
+
+        if ($command->firebirdGeneratedName && $command->columns && mb_check_encoding($legacy, 'UTF-8')) {
+            $legacy = $type === 'FOREIGN KEY' ? strtoupper($legacy) : $legacy;
+            if ($legacy !== $candidate) {
+                $columns = array_values($command->columns);
+                $segments = 'SELECT 1 FROM RDB$INDEX_SEGMENTS s WHERE s.RDB$INDEX_NAME = '.$index;
+                $match = '(SELECT COUNT(*) FROM RDB$INDEX_SEGMENTS s WHERE s.RDB$INDEX_NAME = '.$index.') = '.count($columns);
+                foreach ($columns as $position => $column) {
+                    $match .= ' AND EXISTS ('.$segments.' AND s.RDB$FIELD_POSITION = '.$position.' AND s.RDB$FIELD_NAME = '.$literal($column).')';
+                }
+                $lookup .= "\nIF (object_name IS NULL) THEN\n".$base.' AND '.$field.' = '.$literal($legacy).' AND '.$match.' INTO :object_name;';
+            }
+        }
+
+        // A missing match deliberately leaves the dynamic statement NULL: Firebird
+        // rejects it rather than dropping an unverified identifier or silently succeeding.
+        $drop = $literal($drop);
+
+        return <<<SQL
+            EXECUTE BLOCK AS
+            DECLARE VARIABLE object_name VARCHAR(63) CHARACTER SET UTF8;
+            BEGIN
+                {$lookup}
+                EXECUTE STATEMENT {$drop} || '"' || REPLACE(object_name, '"', '""') || '"';
+            END
+        SQL;
     }
 
     /**
