@@ -6,6 +6,17 @@ use Illuminate\Database\Schema\Blueprint as BaseBlueprint;
 
 class Blueprint extends BaseBlueprint
 {
+    public function build()
+    {
+        foreach ($this->toSql() as $statement) {
+            if ($statement instanceof ForeignKeyDrop) {
+                $statement->execute();
+            } else {
+                $this->connection->statement($statement);
+            }
+        }
+    }
+
     protected function indexCommand($type, $columns, $index, $algorithm = null, $operatorClass = null)
     {
         $generated = ! $index;

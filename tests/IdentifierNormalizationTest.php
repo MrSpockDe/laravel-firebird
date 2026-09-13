@@ -65,7 +65,7 @@ class IdentifierNormalizationTest extends TestCase
             foreach (['first_column_with_long_suffix', 'second_column_with_long_suffix'] as $column) {
                 $original = $table.'_'.$column.'_'.$kind;
                 $name = mb_substr($original, 0, 46, 'UTF-8').'_'.substr(hash('sha256', $original), 0, 16);
-                $expected[] = $kind === 'foreign' ? strtoupper($name) : $name;
+                $expected[] = $name;
                 $this->add($table, $kind, [$column]);
             }
             $this->assertEqualsCanonicalizing($expected, $this->names($table, $kind));
@@ -87,14 +87,19 @@ class IdentifierNormalizationTest extends TestCase
     {
         $table = 'identifier_legacy_common_prefix_table';
         $column = 'first_column_with_long_suffix';
+        // Historical FK identifiers were stored uppercase because CREATE was unquoted.
         $legacy = substr($table.'_'.$column.'_'.$kind, 0, 31);
+        if ($kind === 'foreign') {
+            $legacy = strtoupper($legacy);
+        }
         try {
             $this->createTables($table);
             $this->add($table, $kind, [$column], $legacy);
             try {
                 $this->drop($table, $kind, ['second_column_with_long_suffix']);
                 $this->fail('A colliding legacy prefix must not delete another column’s object.');
-            } catch (QueryException $e) {
+            } catch (\LogicException|QueryException $e) {
+                $this->assertInstanceOf($kind === 'foreign' ? \LogicException::class : QueryException::class, $e);
                 $this->assertCount(1, $this->names($table, $kind));
             }
             $this->drop($table, $kind, [$column]);
@@ -146,7 +151,7 @@ class IdentifierNormalizationTest extends TestCase
         try {
             $this->createTables($table);
             $this->add($table, $kind, ['first_column_with_long_suffix'], $name);
-            $this->assertSame([$kind === 'foreign' ? strtoupper($name) : $name], $this->names($table, $kind));
+            $this->assertSame([$name], $this->names($table, $kind));
             $this->drop($table, $kind, $name);
             $this->assertSame([], $this->names($table, $kind));
         } finally {
@@ -182,7 +187,7 @@ class IdentifierNormalizationTest extends TestCase
             Schema::create($table, fn (Blueprint $b) => $b->integer('id'));
             $this->add($table, $kind, ['id']);
             $name = $table.'_id_'.$kind;
-            $this->assertSame([$kind === 'foreign' ? strtoupper($name) : $name], $this->names($table, $kind));
+            $this->assertSame([$name], $this->names($table, $kind));
             $this->drop($table, $kind, ['id']);
             $this->assertSame([], $this->names($table, $kind));
         } finally {
@@ -360,7 +365,7 @@ class IdentifierNormalizationTest extends TestCase
             try {
                 $this->drop($table, 'foreign', [$column]);
                 $this->fail('A UNIQUE constraint must not be treated as a foreign key.');
-            } catch (QueryException $e) {
+            } catch (\LogicException $e) {
                 $this->assertSame([$legacy], $this->names($table, 'unique'));
             }
         } finally {

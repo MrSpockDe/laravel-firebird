@@ -2,6 +2,7 @@
 
 namespace HarryGulliford\Firebird\Schema\Grammars;
 
+use HarryGulliford\Firebird\Schema\ForeignKeyDrop;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Grammars\Grammar;
 use Illuminate\Support\Fluent;
@@ -530,7 +531,7 @@ class FirebirdGrammar extends Grammar
 
         $onColumns = $this->columnize((array) $command->references);
 
-        $fkName = $this->normalizeIndexName($command);
+        $fkName = $this->wrap($this->normalizeIndexName($command));
 
         $sql = "ALTER TABLE {$table} ADD CONSTRAINT {$fkName} ";
 
@@ -555,11 +556,27 @@ class FirebirdGrammar extends Grammar
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
      * @param  \Illuminate\Support\Fluent  $command
-     * @return string
+     * @return array
      */
     public function compileDropForeign(Blueprint $blueprint, Fluent $command)
     {
-        return $this->compileDropNamedObject($blueprint, $command, 'FOREIGN KEY');
+        $name = $this->normalizeIndexName($command);
+        $legacy = null;
+        if ($command->firebirdGeneratedName && $command->columns) {
+            $candidate = substr($command->firebirdOriginalName ?? $command->index, 0, 31);
+            if (mb_check_encoding($candidate, 'UTF-8')) {
+                $legacy = strtoupper($candidate);
+            }
+        }
+
+        return [new ForeignKeyDrop(
+            $this->connection,
+            $blueprint->getTable(),
+            $this->wrapTable($blueprint),
+            $name,
+            $legacy,
+            array_values($command->columns ?? []),
+        )];
     }
 
     /**
