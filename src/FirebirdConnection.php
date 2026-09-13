@@ -2,6 +2,7 @@
 
 namespace HarryGulliford\Firebird;
 
+use Exception;
 use HarryGulliford\Firebird\Query\Builder as FirebirdQueryBuilder;
 use HarryGulliford\Firebird\Query\Grammars\FirebirdGrammar as FirebirdQueryGrammar;
 use HarryGulliford\Firebird\Query\Processors\FirebirdProcessor as FirebirdQueryProcessor;
@@ -10,9 +11,19 @@ use HarryGulliford\Firebird\Schema\Grammars\FirebirdGrammar as FirebirdSchemaGra
 use Illuminate\Database\Connection as DatabaseConnection;
 use Illuminate\Support\Str;
 use PDO;
+use PDOException;
 
 class FirebirdConnection extends DatabaseConnection
 {
+    /**
+     * Firebird SQLCODE -803 denotes a duplicate PRIMARY or UNIQUE key.
+     */
+    protected function isUniqueConstraintError(Exception $exception)
+    {
+        return $exception instanceof PDOException
+            && in_array($exception->errorInfo[1] ?? null, [-803, '-803'], true);
+    }
+
     /**
      * {@inheritDoc}
      */
