@@ -12,9 +12,25 @@ use Illuminate\Database\Connection as DatabaseConnection;
 use Illuminate\Support\Str;
 use PDO;
 use PDOException;
+use Throwable;
 
 class FirebirdConnection extends DatabaseConnection
 {
+    /**
+     * Older PDO versions report Firebird concurrency conflicts as HY000 / -913.
+     */
+    protected function causedByConcurrencyError(Throwable $e)
+    {
+        for ($exception = $e; $exception !== null; $exception = $exception->getPrevious()) {
+            if ($exception instanceof PDOException
+                && in_array($exception->errorInfo[1] ?? null, [-913, '-913'], true)) {
+                return true;
+            }
+        }
+
+        return parent::causedByConcurrencyError($e);
+    }
+
     /**
      * Firebird SQLCODE -803 denotes a duplicate PRIMARY or UNIQUE key.
      */
