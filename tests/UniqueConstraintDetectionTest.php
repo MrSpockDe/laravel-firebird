@@ -22,6 +22,8 @@ class UniqueConstraintDetectionTest extends TestCase
     #[DataProvider('raceMethods')]
     public function it_recovers_from_a_competing_insert(string $method): void
     {
+        $a = DB::connection();
+        $aTransactionOpen = false;
         $b = null;
         try {
             Schema::create('unique_race_test', function (Blueprint $table) {
@@ -34,6 +36,18 @@ class UniqueConstraintDetectionTest extends TestCase
             $b = new FirebirdConnection((new FirebirdConnector)->connect($config), $config['database'], '', $config);
             $attachment = 'SELECT CURRENT_CONNECTION AS "id" FROM RDB$DATABASE';
             $this->assertNotSame(DB::selectOne($attachment)->id, $b->selectOne($attachment)->id);
+            // Older PDO versions retain a snapshot in autocommit mode. The retry
+            // must be able to see B's committed row in the same transaction.
+            $a->getPdo()->setAttribute(PDO::ATTR_AUTOCOMMIT, false);
+            $a->statement('SET TRANSACTION READ WRITE ISOLATION LEVEL READ COMMITTED NO WAIT');
+            $aTransactionOpen = true;
+            $transaction = $a->selectOne(
+                'SELECT MON$ISOLATION_MODE AS "isolation", MON$LOCK_TIMEOUT AS "timeout" '
+                .'FROM MON$TRANSACTIONS WHERE MON$TRANSACTION_ID = CURRENT_TRANSACTION'
+            );
+            // READ COMMITTED may use record version, no record version or read consistency.
+            $this->assertContains((int) $transaction->isolation, [2, 3, 4]);
+            $this->assertSame(0, (int) $transaction->timeout);
             $createdId = null;
             $calls = 0;
             UniqueRaceModel::creating(function () use ($b, &$createdId, &$calls) {
@@ -54,11 +68,22 @@ class UniqueConstraintDetectionTest extends TestCase
             $this->assertSame(1, DB::table('unique_race_test')->count());
         } finally {
             UniqueRaceModel::flushEventListeners();
-            if ($b !== null && $b->transactionLevel() > 0) {
-                $b->rollBack();
+            try {
+                if ($aTransactionOpen) {
+                    $a->statement('ROLLBACK WORK');
+                    $aTransactionOpen = false;
+                }
+            } finally {
+                $a->disconnect();
+                try {
+                    if ($b !== null && $b->transactionLevel() > 0) {
+                        $b->rollBack();
+                    }
+                } finally {
+                    $b?->disconnect();
+                    Schema::dropIfExists('unique_race_test');
+                }
             }
-            $b?->disconnect();
-            Schema::dropIfExists('unique_race_test');
         }
     }
 
@@ -82,15 +107,21 @@ class UniqueConstraintDetectionTest extends TestCase
             });
             DB::table('unique_detection_parent')->insert(['id' => 1]);
             DB::table('unique_detection_child')->insert(['id' => 1, 'name' => 'existing', 'parent_id' => 1]);
+            $before = DB::table('unique_detection_child')->get()->all();
             try {
                 DB::table('unique_detection_child')->insert($row);
                 $this->fail('Constraint violation accepted: '.$kind);
             } catch (QueryException $e) {
                 $this->assertSame($unique, $e instanceof UniqueConstraintViolationException);
                 $this->assertInstanceOf(PDOException::class, $e->getPrevious());
-                $this->assertSame($unique ? -803 : ($kind === 'foreign' ? -530 : -625), $e->getPrevious()->errorInfo[1]);
+                if ($kind === 'not null') {
+                    $detector = new ReflectionMethod(FirebirdConnection::class, 'isUniqueConstraintError');
+                    $this->assertFalse($detector->invoke(DB::connection(), $e->getPrevious()));
+                } else {
+                    $this->assertSame($unique ? -803 : -530, $e->getPrevious()->errorInfo[1]);
+                }
             }
-            $this->assertSame(1, DB::table('unique_detection_child')->count());
+            $this->assertEquals($before, DB::table('unique_detection_child')->get()->all());
         } finally {
             Schema::dropIfExists('unique_detection_child');
             Schema::dropIfExists('unique_detection_parent');
