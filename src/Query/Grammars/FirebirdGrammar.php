@@ -350,6 +350,78 @@ class FirebirdGrammar extends Grammar
         return 'insert into '.$table.' ('.$this->columnize($columns).') '.implode(' union all ', $selects);
     }
 
+    /** {@inheritDoc} */
+    public function compileUpsert(Builder $query, array $values, array $uniqueBy, array $update)
+    {
+        if (! is_string($query->from) || preg_match('/\\s+as\\s+/i', $query->from)) {
+            throw new \LogicException('Firebird upserts require a table name without an alias or expression.');
+        }
+
+        $first = reset($values);
+        $columns = is_array($first) ? array_keys($first) : [];
+        if ($columns === [] || $uniqueBy === []) {
+            throw new \LogicException('Firebird upserts require columns and a non-empty uniqueBy.');
+        }
+        foreach (array_merge($columns, $uniqueBy, array_map(
+            fn ($value, $key) => is_int($key) ? $value : $key, $update, array_keys($update)
+        )) as $column) {
+            if (! is_string($column) || $column === '' || str_contains($column, '.') || $column === '*') {
+                throw new \LogicException('Firebird upserts require unqualified column names.');
+            }
+        }
+        foreach ($uniqueBy as $column) {
+            if (! in_array($column, $columns, true)) {
+                throw new \LogicException('Every upsert match column must be present in the source.');
+            }
+        }
+
+        $table = $this->wrapTable($query->from);
+        $target = $this->wrapValue('fb_target');
+        $source = $this->wrapValue('fb_source');
+        $selects = [];
+        foreach ($values as $row) {
+            if (! is_array($row) || array_keys($row) !== $columns) {
+                throw new \LogicException('Firebird upserts require the same columns in every source row.');
+            }
+            $parameters = [];
+            foreach ($row as $column => $value) {
+                if (! is_null($value) && ! is_scalar($value) && ! $value instanceof \DateTimeInterface) {
+                    throw new \LogicException('Expressions and non-scalar source values are not supported in Firebird upserts.');
+                }
+                $wrapped = $this->wrapValue($column);
+                $parameters[] = 'cast(? as type of column '.$table.'.'.$wrapped.') as '.$wrapped;
+            }
+            $selects[] = 'select '.implode(', ', $parameters).' from rdb$database';
+        }
+
+        $assignments = [];
+        foreach ($update as $key => $value) {
+            if (is_int($key)) {
+                if (! in_array($value, $columns, true)) {
+                    throw new \LogicException('Every copied upsert update column must be present in the source.');
+                }
+                $assignments[] = $target.'.'.$this->wrapValue($value).' = '.$source.'.'.$this->wrapValue($value);
+            } else {
+                if (! is_null($value) && ! is_scalar($value) && ! $value instanceof \DateTimeInterface) {
+                    throw new \LogicException('Expressions and non-scalar update values are not supported in Firebird upserts.');
+                }
+                $assignments[] = $target.'.'.$this->wrapValue($key).' = ?';
+            }
+        }
+
+        $matches = array_map(fn ($column) => $target.'.'.$this->wrapValue($column)
+            .' is not distinct from '.$source.'.'.$this->wrapValue($column), $uniqueBy);
+        $nonNull = array_map(fn ($column) => $source.'.'.$this->wrapValue($column).' is not null', $uniqueBy);
+        $sql = 'merge into '.$table.' as '.$target.' using ('.implode(' union all ', $selects).') as '.$source
+            .' on '.implode(' and ', $matches).' and ('.implode(' or ', $nonNull).')';
+        if ($assignments !== []) {
+            $sql .= ' when matched then update set '.implode(', ', $assignments);
+        }
+
+        return $sql.' when not matched then insert ('.$this->columnize($columns).') values ('
+            .implode(', ', array_map(fn ($column) => $source.'.'.$this->wrapValue($column), $columns)).')';
+    }
+
     /**
      * Compile an insert and get ID statement into SQL.
      *
