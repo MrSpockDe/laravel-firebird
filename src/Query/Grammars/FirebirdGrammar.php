@@ -117,6 +117,25 @@ class FirebirdGrammar extends Grammar
     }
 
     /**
+     * Firebird requires a qualified wildcard alongside the row-number column.
+     */
+    protected function compileGroupLimit(Builder $query)
+    {
+        $columns = $query->columns;
+
+        if (is_string($query->from) && in_array('*', $columns, true)) {
+            $table = last(preg_split('/\s+as\s+/i', $query->from));
+            $query->columns = array_map(fn ($column) => $column === '*' ? $table.'.*' : $column, $columns);
+        }
+
+        try {
+            return parent::compileGroupLimit($query);
+        } finally {
+            $query->columns = $columns;
+        }
+    }
+
+    /**
      * Compile the "limit" portions of the query.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
