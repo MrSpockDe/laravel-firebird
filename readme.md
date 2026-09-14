@@ -57,6 +57,36 @@ See:
 
 Until the relevant items in the support matrix are marked supported, do not rely on this fork for production migration workflows.
 
+## Parameters in raw SQL expressions
+
+Firebird cannot infer a bound parameter's SQL type in some raw expressions during
+statement preparation. For example, this SELECT fails with SQLCODE `-804`:
+
+```php
+DB::table('items')->selectRaw('"value" + ?', [1])->get();
+```
+
+Provide the intended type explicitly:
+
+```php
+DB::table('items')->selectRaw('"value" + CAST(? AS INTEGER)', [1])->get();
+```
+
+When the parameter should use an existing column's type, you can also use:
+
+```sql
+CAST(? AS TYPE OF COLUMN "items"."value")
+```
+
+`TYPE OF COLUMN` requires the physical table/view name, not a query alias.
+Table prefixes are not automatically added inside raw SQL; include the actual
+physical name and quote identifiers appropriately.
+
+Not all raw bindings need a cast. Direct comparisons such as
+`whereRaw('"value" > ?', [10])` and other sufficiently typed SQL contexts work
+without one. Raw SQL and its type choices remain the caller's responsibility;
+the driver does not automatically infer types or rewrite raw expressions.
+
 ## Credits
 - [Harry Gulliford](https://github.com/harrygulliford)
 - [Jacques van Zuydam](https://github.com/jacquestvanzuydam/laravel-firebird)
