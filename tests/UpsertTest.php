@@ -111,7 +111,19 @@ class UpsertTest extends TestCase
                 $q->upsert([['a' => 9, 'b' => 9, 'value' => 'new'], ['a' => 1, 'b' => 1, 'value' => 'first'], ['a' => 1, 'b' => 1, 'value' => 'second']], ['a', 'b'], ['value']);
                 $this->fail('Duplicate source keys must fail.');
             } catch (QueryException $e) {
-                $this->assertSame($code, (int) $e->getPrevious()->errorInfo[1]);
+                $previous = $e->getPrevious();
+                $this->assertInstanceOf(\PDOException::class, $previous);
+                if ($existing) {
+                    $sqlcode = (int) $previous->errorInfo[1];
+                    $message = ($previous->errorInfo[2] ?? '').' '.$previous->getMessage();
+                    $this->assertTrue(
+                        $sqlcode === -811 || ($sqlcode === -999
+                            && preg_match('/\b335545269\b/', $message) === 1),
+                        'Expected the specific Firebird merge_dup_update error.'
+                    );
+                } else {
+                    $this->assertSame($code, (int) $e->getPrevious()->errorInfo[1]);
+                }
             }
             $this->assertSame($existing ? ['original'] : [], $q->pluck('value')->all());
         });
