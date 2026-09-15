@@ -3,6 +3,7 @@
 namespace HarryGulliford\Firebird\Schema\Grammars;
 
 use HarryGulliford\Firebird\Schema\ForeignKeyDrop;
+use Illuminate\Database\Query\Expression;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Grammars\Grammar;
 use Illuminate\Support\Fluent;
@@ -945,7 +946,7 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeDateTime(Fluent $column)
     {
-        return 'TIMESTAMP';
+        return $this->typeTimestamp($column);
     }
 
     /**
@@ -956,7 +957,7 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeDateTimeTz(Fluent $column)
     {
-        return 'TIMESTAMP WITH TIME ZONE';
+        return $this->typeTimestampTz($column);
     }
 
     /**
@@ -990,7 +991,7 @@ class FirebirdGrammar extends Grammar
     protected function typeTimestamp(Fluent $column)
     {
         if ($column->useCurrent) {
-            return 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP';
+            $column->default(new Expression('CURRENT_TIMESTAMP'));
         }
 
         return 'TIMESTAMP';
@@ -1004,11 +1005,7 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeTimestampTz(Fluent $column)
     {
-        if ($column->useCurrent) {
-            return 'TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP';
-        }
-
-        return 'TIMESTAMP WITH TIME ZONE';
+        return $this->typeTimestamp($column).' WITH TIME ZONE';
     }
 
     /**
