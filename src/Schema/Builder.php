@@ -10,6 +10,25 @@ use Throwable;
 
 class Builder extends BaseBuilder
 {
+    /** Preserve physical Firebird index names, including quoted case and RDB$ names. */
+    public function hasIndex($table, $index, $type = null)
+    {
+        $type = is_null($type) ? $type : strtolower($type);
+
+        foreach ($this->getIndexes($table) as $value) {
+            $typeMatches = is_null($type)
+                || ($type === 'primary' && $value['primary'])
+                || ($type === 'unique' && $value['unique'])
+                || $type === $value['type'];
+
+            if (($value['name'] === $index || $value['columns'] === $index) && $typeMatches) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** Drop user views, starting with views which no other view uses. */
     public function dropAllViews()
     {
