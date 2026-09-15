@@ -148,6 +148,49 @@ class FirebirdGrammar extends Grammar
             .'order by rdb$relation_name';
     }
 
+    /** Inventory physical user tables, including external tables and GTTs. */
+    public function compileWipeTables(): string
+    {
+        return 'select trim(trailing from rdb$relation_name) as "name", rdb$relation_type as "type" '
+            .'from rdb$relations where (rdb$system_flag is null or rdb$system_flag = 0) '
+            .'and rdb$view_blr is null and rdb$relation_type <> 3 order by rdb$relation_name';
+    }
+
+    public function compileViewDependencies(): string
+    {
+        return 'select distinct trim(trailing from rdb$view_name) as "view_name", '
+            .'trim(trailing from rdb$relation_name) as "relation_name" from rdb$view_relations';
+    }
+
+    public function compileWipeForeignKeys(): string
+    {
+        return <<<'SQL'
+            SELECT TRIM(TRAILING FROM c.RDB$RELATION_NAME) AS "table_name",
+                   TRIM(TRAILING FROM c.RDB$CONSTRAINT_NAME) AS "name",
+                   TRIM(TRAILING FROM p.RDB$RELATION_NAME) AS "parent_name"
+            FROM RDB$RELATION_CONSTRAINTS c
+            JOIN RDB$REF_CONSTRAINTS r ON r.RDB$CONSTRAINT_NAME = c.RDB$CONSTRAINT_NAME
+            JOIN RDB$RELATION_CONSTRAINTS p ON p.RDB$CONSTRAINT_NAME = r.RDB$CONST_NAME_UQ
+            WHERE c.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'
+            ORDER BY c.RDB$RELATION_NAME, c.RDB$CONSTRAINT_NAME
+            SQL;
+    }
+
+    public function compileWipeTable(string $name): string
+    {
+        return 'DROP TABLE '.$this->wrapValue($name);
+    }
+
+    public function compileWipeView(string $name): string
+    {
+        return 'DROP VIEW '.$this->wrapValue($name);
+    }
+
+    public function compileWipeForeignKey(string $table, string $name): string
+    {
+        return 'ALTER TABLE '.$this->wrapValue($table).' DROP CONSTRAINT '.$this->wrapValue($name);
+    }
+
     /**
      * Compile the query to determine the indexes and their ordered columns.
      *
