@@ -13,6 +13,8 @@ class FirebirdGrammar extends Grammar
     /** {@inheritDoc} */
     protected function getColumn(Blueprint $blueprint, $column)
     {
+        $this->validateSupportedModifiers($column);
+
         if (! array_key_exists('virtualAs', $column->getAttributes())) {
             return parent::getColumn($blueprint, $column);
         }
@@ -39,6 +41,30 @@ class FirebirdGrammar extends Grammar
 
         return $this->wrap($column).' '.$this->getType($column)
             .' COMPUTED BY ('.$this->getValue($column->virtualAs).')';
+    }
+
+    /**
+     * Reject column modifiers that cannot be represented by this driver.
+     */
+    protected function validateSupportedModifiers(Fluent $column): void
+    {
+        $attributes = $column->getAttributes();
+
+        if (array_key_exists('storedAs', $attributes)) {
+            throw new \LogicException('Firebird does not support the storedAs() modifier.');
+        }
+
+        if (array_key_exists('virtualAs', $attributes) && $column->persisted) {
+            throw new \LogicException('Firebird does not support persisted() on virtualAs() columns.');
+        }
+
+        if (! is_null($column->generatedAs) && ! is_bool($column->generatedAs)) {
+            throw new \LogicException('Firebird does not support custom generatedAs() options or expressions.');
+        }
+
+        if ($column->useCurrentOnUpdate) {
+            throw new \LogicException('Firebird does not support the useCurrentOnUpdate() modifier.');
+        }
     }
 
     /** @var array */
@@ -346,6 +372,8 @@ class FirebirdGrammar extends Grammar
     public function compileChange(Blueprint $blueprint, Fluent $command)
     {
         $column = $command->column;
+        $this->validateSupportedModifiers($column);
+
         if (array_key_exists('virtualAs', $column->getAttributes())) {
             throw new \LogicException('Firebird does not support changing computed columns through virtualAs().');
         }
