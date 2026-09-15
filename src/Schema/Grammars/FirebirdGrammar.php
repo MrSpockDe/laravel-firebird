@@ -112,6 +112,16 @@ class FirebirdGrammar extends Grammar
             .'order by rdb$relation_name';
     }
 
+    /** {@inheritDoc} */
+    public function compileViews($schema)
+    {
+        return 'select trim(trailing from rdb$relation_name) as "name", rdb$view_source as "definition" '
+            .'from rdb$relations '
+            .'where rdb$view_blr is not null '
+            .'and (rdb$system_flag is null or rdb$system_flag = 0) '
+            .'order by rdb$relation_name';
+    }
+
     /**
      * Compile the query to determine the indexes and their ordered columns.
      *
