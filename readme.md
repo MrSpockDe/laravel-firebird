@@ -87,6 +87,23 @@ Not all raw bindings need a cast. Direct comparisons such as
 without one. Raw SQL and its type choices remain the caller's responsibility;
 the driver does not automatically infer types or rewrite raw expressions.
 
+## Insert while ignoring duplicate keys
+
+`insertOrIgnore($values)` supports single rows and batches. It returns the number
+of rows inserted and ignores Firebird SQLCODE `-803` (PRIMARY KEY / UNIQUE
+violations). Other errors propagate; a non-ignored error rolls back the statement's
+changes. Identity sequences may still advance for ignored or rolled-back inserts.
+
+The handler also catches `-803` raised by triggers, including constraints on other
+tables. Under `NO WAIT`, Firebird can report an uncommitted competing UNIQUE key
+as `-803`: the row may be ignored even if the competing transaction later rolls
+back. A WAIT timeout can likewise surface as `-803` during a uniqueness check.
+The driver does not change transaction settings or retry these conflicts.
+
+Single-row expressions use Laravel's normal expression handling. As with batch
+`insert()`, raw expressions in multi-row input are explicitly unsupported.
+`insertOrIgnoreUsing()` and `insertOrIgnoreReturning()` remain unsupported.
+
 ## Credits
 - [Harry Gulliford](https://github.com/harrygulliford)
 - [Jacques van Zuydam](https://github.com/jacquestvanzuydam/laravel-firebird)
