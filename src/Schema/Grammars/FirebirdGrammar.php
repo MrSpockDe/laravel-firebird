@@ -97,7 +97,7 @@ class FirebirdGrammar extends Grammar
      *
      * @var array
      */
-    protected $modifiers = ['Charset', 'Increment', 'Default', 'Nullable', 'Collate'];
+    protected $modifiers = ['Charset', 'Increment', 'Default', 'Nullable', 'EnumCheck', 'Collate'];
 
     /**
      * The columns available as serials.
@@ -415,6 +415,10 @@ class FirebirdGrammar extends Grammar
     public function compileChange(Blueprint $blueprint, Fluent $command)
     {
         $column = $command->column;
+        if ($column->type === 'enum') {
+            throw new \LogicException('Firebird does not support changing enum columns.');
+        }
+
         $this->validateSupportedModifiers($column);
 
         if (array_key_exists('virtualAs', $column->getAttributes())) {
@@ -979,11 +983,23 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeEnum(Fluent $column)
     {
+        return 'VARCHAR(255)';
+    }
+
+    /**
+     * Place the enum constraint after defaults and nullability, before collation.
+     */
+    protected function modifyEnumCheck(Blueprint $blueprint, Fluent $column)
+    {
+        if ($column->type !== 'enum') {
+            return '';
+        }
+
         $allowed = array_map(function ($a) {
             return $this->escape((string) $a);
         }, $column->allowed);
 
-        return "VARCHAR(255) CHECK (\"{$column->name}\" IN (".implode(', ', $allowed).'))';
+        return " CHECK (\"{$column->name}\" IN (".implode(', ', $allowed).'))';
     }
 
     /**
