@@ -1097,7 +1097,11 @@ class FirebirdGrammar extends Grammar
      */
     protected function typeBinary(Fluent $column)
     {
-        return 'BLOB SUB_TYPE BINARY';
+        if (is_null($column->length)) {
+            return 'BLOB SUB_TYPE BINARY';
+        }
+
+        return ($column->fixed ? 'BINARY' : 'VARBINARY').'('.$column->length.')';
     }
 
     /**
