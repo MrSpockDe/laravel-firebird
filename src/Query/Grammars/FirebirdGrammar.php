@@ -370,6 +370,51 @@ class FirebirdGrammar extends Grammar
     }
 
     /** {@inheritDoc} */
+    public function compileInsertOrIgnore(Builder $query, array $values)
+    {
+        if (! is_string($query->from) || preg_match('/\\s+as\\s+/i', $query->from)) {
+            throw new \LogicException('Firebird insertOrIgnore requires a table name without an alias or expression.');
+        }
+
+        if (! is_array(reset($values))) {
+            $values = [$values];
+        }
+
+        $table = $this->wrapTable($query->from);
+        $columns = array_keys(reset($values));
+        $parameters = [];
+        $statements = [];
+
+        foreach ($values as $row) {
+            if (array_keys($row) !== $columns) {
+                throw new \LogicException('Firebird insertOrIgnore requires the same column list in every row.');
+            }
+
+            $arguments = [];
+            foreach ($row as $column => $value) {
+                if ($this->isExpression($value)) {
+                    if (count($values) > 1) {
+                        throw new \LogicException('Raw expressions are not supported in batch inserts.');
+                    }
+                    $arguments[] = $this->parameter($value);
+                } else {
+                    $name = 'p'.count($parameters);
+                    $parameters[] = $name.' TYPE OF COLUMN '.$table.'.'.$this->wrap($column).' = ?';
+                    $arguments[] = ':'.$name;
+                }
+            }
+
+            $insert = 'INSERT INTO '.$table.($columns === []
+                ? ' DEFAULT VALUES'
+                : ' ('.$this->columnize($columns).') VALUES ('.implode(', ', $arguments).')');
+            $statements[] = 'BEGIN '.$insert.'; WHEN SQLCODE -803 DO BEGIN END END';
+        }
+
+        return 'EXECUTE BLOCK'.($parameters === [] ? '' : ' ('.implode(', ', $parameters).')')
+            .' AS BEGIN '.implode(' ', $statements).' END';
+    }
+
+    /** {@inheritDoc} */
     public function compileUpsert(Builder $query, array $values, array $uniqueBy, array $update)
     {
         if (! is_string($query->from) || preg_match('/\\s+as\\s+/i', $query->from)) {
