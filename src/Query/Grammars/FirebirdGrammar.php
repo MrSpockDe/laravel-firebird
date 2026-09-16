@@ -10,6 +10,25 @@ use Illuminate\Support\Str;
 class FirebirdGrammar extends Grammar
 {
     /** {@inheritDoc} */
+    protected function whereBitwise(Builder $query, $where)
+    {
+        if (in_array($where['operator'], ['<<', '>>'], true)) {
+            throw new \LogicException('Firebird bitwise WHERE shifts (<< and >>) are not supported.');
+        }
+
+        $column = $this->wrap($where['column']);
+        $value = $this->parameter($where['value']);
+
+        return match ($where['operator']) {
+            '&' => 'BIN_AND('.$column.', '.$value.') <> 0',
+            '|' => 'BIN_OR('.$column.', '.$value.') <> 0',
+            '^' => 'BIN_XOR('.$column.', '.$value.') <> 0',
+            '&~' => 'BIN_AND('.$column.', BIN_NOT('.$value.')) <> 0',
+            default => throw new \LogicException('Unsupported Firebird bitwise WHERE operator.'),
+        };
+    }
+
+    /** {@inheritDoc} */
     public function compileTruncate(Builder $query)
     {
         throw new \LogicException('Firebird does not support truncate operations.');
