@@ -606,6 +606,12 @@ class FirebirdGrammar extends Grammar
      */
     public function compileForeign(Blueprint $blueprint, Fluent $command)
     {
+        foreach ([$command->onDelete, $command->onUpdate] as $action) {
+            if (is_string($action) && strtolower(trim($action)) === 'restrict') {
+                throw new \LogicException('Firebird does not support the RESTRICT foreign key action. Use NO ACTION or omit the action instead.');
+            }
+        }
+
         $table = $this->wrapTable($blueprint);
 
         $on = $this->wrapTable($command->on);
