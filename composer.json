@@ -1,6 +1,6 @@
 {
   "$schema": "https://getcomposer.org/schema.json",
-  "name": "harrygulliford/laravel-firebird",
+  "name": "mrspockde/laravel-firebird",
   "description": "Firebird database driver for the Laravel Framework",
   "license": "MIT",
   "require": {
@@ -9,6 +9,9 @@
     "illuminate/container": "^12.17|^13.0",
     "illuminate/database": "^12.17|^13.0",
     "illuminate/events": "^12.17|^13.0"
+  },
+  "conflict": {
+    "harrygulliford/laravel-firebird": "*"
   },
   "require-dev": {
     "mockery/mockery": "^1.6",
