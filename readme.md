@@ -33,18 +33,21 @@ other platforms and future PHP versions are not established by this matrix.
 
 ## Installation
 
-The new package identity is not yet available on the published `4.x` branch.
-The commands below describe future availability, not an installation available now.
-
-After the package rename has been pushed to the fork's `4.x` branch, development
-installation via VCS will be possible:
+The new package identity is available on the published `4.x` branch.
+Development installation via the fork's explicit Composer VCS repository is
+currently possible:
 
 ```bash
 composer config repositories.firebird vcs https://github.com/MrSpockDe/laravel-firebird.git
 composer require "mrspockde/laravel-firebird:4.x-dev"
 ```
 
-Installing `4.0.0-beta.1` requires the corresponding published `v4.0.0-beta.1`
+The independent VCS installation gate passed at development commit
+`1b2586fd5c375052a4a2eb2133c8d88f6a1a2c3f`; see the
+[validation evidence](releases/v4.0.0-beta.1.md#evidence-and-remaining-release-gate).
+The unpinned `4.x-dev` command follows the branch and may install a later commit.
+
+The beta is not yet published. Installing `4.0.0-beta.1` requires the corresponding published `v4.0.0-beta.1`
 tag containing the new package identity. The development branch alone does not
 provide that release. Normal installation through Packagist, without the VCS
 override, becomes available only after package registration and version indexing.
