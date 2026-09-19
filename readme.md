@@ -1,9 +1,9 @@
 # Firebird for Laravel — independent mrspockde package
 
-[![Latest Version](https://poser.pugx.org/mrspockde/laravel-firebird/v)](https://packagist.org/packages/mrspockde/laravel-firebird)
+[![Latest release (including prereleases)](https://img.shields.io/github/v/release/MrSpockDe/laravel-firebird?include_prereleases&label=release)](https://github.com/MrSpockDe/laravel-firebird/releases)
 [![Total Downloads](https://poser.pugx.org/mrspockde/laravel-firebird/downloads)](https://packagist.org/packages/mrspockde/laravel-firebird)
 [![Tests](https://github.com/MrSpockDe/laravel-firebird/actions/workflows/tests.yml/badge.svg)](https://github.com/MrSpockDe/laravel-firebird/actions/workflows/tests.yml)
-[![License](https://poser.pugx.org/mrspockde/laravel-firebird/license)](https://packagist.org/packages/mrspockde/laravel-firebird)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 `mrspockde/laravel-firebird` is an independently maintained Composer package
 in [MrSpockDe/laravel-firebird](https://github.com/MrSpockDe/laravel-firebird).
@@ -11,10 +11,12 @@ It adds Firebird PDO support, schema operations and Eloquent integration to Lara
 It derives from the original [harrygulliford/laravel-firebird project](https://github.com/harrygulliford/laravel-firebird);
 upstream ownership and contributor credits are preserved below.
 
-> **Release preparation:** `v4.0.0-beta.1` is not yet published for this independent
-> package. See the [draft release notes](releases/v4.0.0-beta.1.md).
-> Packagist badges become available after registration and publication. The
-> upstream package's identically numbered release is a different artifact.
+> **Published beta:** `v4.0.0-beta.1` is available as a
+> [GitHub prerelease](https://github.com/MrSpockDe/laravel-firebird/releases/tag/v4.0.0-beta.1)
+> and on [Packagist](https://packagist.org/packages/mrspockde/laravel-firebird).
+> See the [release notes](releases/v4.0.0-beta.1.md). This is a beta, not a stable
+> or production-ready release. The upstream package's identically numbered
+> release is a different artifact.
 
 > **Fork development note:** This fork is extending the upstream driver with comprehensive, tested Laravel schema builder and migration support for operations that can be represented safely in Firebird. This work is in progress and should not yet be considered production-ready migration support. See [the roadmap](docs/roadmap.md) and [historical migration support matrix at `065f24d`](docs/migration-support.md).
 
@@ -33,29 +35,17 @@ other platforms and future PHP versions are not established by this matrix.
 
 ## Installation
 
-The new package identity is available on the published `4.x` branch.
-Development installation via the fork's explicit Composer VCS repository is
-currently possible:
-
-```bash
-composer config repositories.firebird vcs https://github.com/MrSpockDe/laravel-firebird.git
-composer require "mrspockde/laravel-firebird:4.x-dev"
-```
-
-The independent VCS installation gate passed at development commit
-`1b2586fd5c375052a4a2eb2133c8d88f6a1a2c3f`; see the
-[validation evidence](releases/v4.0.0-beta.1.md#evidence-and-remaining-release-gate).
-The unpinned `4.x-dev` command follows the branch and may install a later commit.
-
-The beta is not yet published. Installing `4.0.0-beta.1` requires the corresponding published `v4.0.0-beta.1`
-tag containing the new package identity. The development branch alone does not
-provide that release. Normal installation through Packagist, without the VCS
-override, becomes available only after package registration and version indexing.
-Once those steps are complete, install the exact beta version:
+Install the exact published beta from Packagist; no custom VCS repository is needed:
 
 ```bash
 composer require "mrspockde/laravel-firebird:4.0.0-beta.1"
 ```
+
+When switching from the earlier fork development setup, remove the custom
+`firebird` VCS repository entry from `composer.json` as part of the switch.
+The `4.x-dev` constraint follows ongoing development and is not the pinned beta.
+See the [validation evidence](releases/v4.0.0-beta.1.md#release-and-validation-evidence)
+for the separate development-commit and published-beta checks.
 
 The explicit beta constraint permits this package while retaining the application's
 `minimum-stability: stable`. Do not install it alongside
@@ -99,7 +89,7 @@ See:
 
 The [current release notes](releases/v4.0.0-beta.1.md) and current implementation
 supersede outdated statements in that snapshot. It is not an exhaustive description
-of the beta candidate. This beta does not promise production-ready migration workflows.
+of the published beta. This beta does not promise production-ready migration workflows.
 
 ## Parameters in raw SQL expressions
 
