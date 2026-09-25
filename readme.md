@@ -57,6 +57,47 @@ Laravel automatically discovers `HarryGulliford\Firebird\FirebirdServiceProvider
 The existing `HarryGulliford\Firebird\` PHP namespace and PSR-4 mappings remain
 unchanged; Composer package identity is independent of PHP class names.
 
+### Database creation for stock Laravel 13 migrations
+
+A fresh installation using `laravel/laravel v13.10.1`, Laravel Framework
+`v13.33.0` and the published `mrspockde/laravel-firebird v4.0.0-beta.1`
+successfully ran all three unchanged Laravel standard migrations with
+`php artisan migrate --no-interaction` on Firebird `5.0.4`, using **16384-byte
+pages**, character set **UTF8** and collation **UTF8**. The second run reported
+`Nothing to migrate`.
+
+In a separate reproduction with 8192-byte pages, the original composite
+`failed_jobs` index on `connection`, `queue` and `failed_at` failed with
+`key size exceeds implementation restriction`. This is a demonstrated Firebird
+index-size restriction for the tested schema; incorrect SQL generation by the
+driver was not demonstrated. See [issue #112](https://github.com/MrSpockDe/laravel-firebird/issues/112).
+
+For new databases using this specific combination, use the successfully tested
+16384-byte page size. This is not a general minimum requirement for all Laravel
+or Firebird applications.
+
+For the official `firebirdsql/firebird` Docker image, add these environment
+variables when creating the database:
+
+```yaml
+FIREBIRD_DATABASE_PAGE_SIZE: "16384"
+FIREBIRD_DATABASE_DEFAULT_CHARSET: "UTF8"
+```
+
+These settings apply only when the image creates a new database. Changing the
+Compose environment or Laravel connection configuration does not change an
+existing database's page size. Laravel's connection `charset` setting controls
+the connection character set, not the database's default character set.
+
+Verify the actual database path and page size with this read-only query:
+
+```sql
+SELECT MON$DATABASE_NAME, MON$PAGE_SIZE
+FROM MON$DATABASE;
+```
+
+### Laravel connection configuration
+
 Declare the connection within your `config/database.php` file by using `firebird` as the
 driver:
 ```php
