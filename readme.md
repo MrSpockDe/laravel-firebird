@@ -18,7 +18,12 @@ upstream ownership and contributor credits are preserved below.
 > or production-ready release. The upstream package's identically numbered
 > release is a different artifact.
 
-> **Fork development note:** This fork is extending the upstream driver with comprehensive, tested Laravel schema builder and migration support for operations that can be represented safely in Firebird. This work is in progress and should not yet be considered production-ready migration support. See [the roadmap](docs/roadmap.md) and [historical migration support matrix at `065f24d`](docs/migration-support.md).
+> **RC1 preparation:** The `4.x` development branch has completed technical migration
+> hardening for the planned `v4.0.0-rc.1`. RC1 is **not yet published**; the beta
+> above remains the available release. The [current support reference](docs/migration-support.md)
+> describes integration-tested operations and deliberate Firebird limitations.
+> See the [roadmap](docs/roadmap.md) and [draft RC1 notes](releases/v4.0.0-rc.1.md).
+> A release candidate is not a stable release or a production-readiness guarantee.
 
 ## Version Support
 
@@ -119,18 +124,34 @@ driver:
 
 ## Migration support
 
-The upstream package explicitly does not target database migrations. This fork is developing that support incrementally and test-first.
+This independent fork provides integration-tested schema and migration support
+beyond the upstream package's migration scope. The current `4.x` branch covers
+core table/column lifecycles, constraints, introspection, comments, virtual computed
+columns and representative Laravel helpers. Support is limited to the operations
+and semantics documented in the [current migration support reference](docs/migration-support.md);
+it is not a promise of full Laravel API parity.
 
-A schema feature is considered supported only when Laravel can execute it against Firebird and integration tests verify the resulting Firebird metadata. Features without a safe Firebird equivalent should fail explicitly rather than silently generate incorrect SQL.
+At technical baseline `7a68ea3`, the full local suite passed on Firebird 4 and 5,
+each with 646 tests / 4563 assertions. [CI](https://github.com/MrSpockDe/laravel-firebird/actions/runs/36324558893)
+passed all 28 matrix jobs plus `ci-success` for the version matrix above.
+These are development-branch results, not validation of an installed RC1.
+The [published beta notes](releases/v4.0.0-beta.1.md) retain their historical scope;
+[RC1 notes](releases/v4.0.0-rc.1.md) are preparation only.
 
-See:
+Important boundaries include signed integer mappings without unsigned range
+semantics, JSON text storage, ENUM as VARCHAR+CHECK, restricted ALTER operations
+and no automatic migration transactions. TZ storage is native, with the tested
+client-transport limits described in the support reference. Empty BLOB fetches may
+be `''` or `null` depending on PHP/PDO; the test permits both, while database NULL
+and a non-NULL zero-length BLOB remain distinct.
 
-- [Development roadmap](docs/roadmap.md)
-- [Laravel migration support matrix](docs/migration-support.md): historical snapshot at commit `065f24d`.
+### Application Unix timestamps beyond 2038
 
-The [current release notes](releases/v4.0.0-beta.1.md) and current implementation
-supersede outdated statements in that snapshot. It is not an exhaustive description
-of the published beta. This beta does not promise production-ready migration workflows.
+For long-lived application schemas, consider BIGINT for Unix-second columns that
+currently use `integer()` / `unsignedInteger()` (signed Firebird INTEGER), keeping
+their existing nullability. See the [seven-column Laravel 13 / OweFlow recommendation](docs/migration-support.md#unix-timestamps-and-the-2038-horizon).
+This is an application-schema choice, not a driver mapping change or a claim that
+unchanged Laravel standard migrations fail.
 
 ## Parameters in raw SQL expressions
 
