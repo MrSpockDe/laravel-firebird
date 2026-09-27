@@ -753,6 +753,53 @@ class MigrationTest extends TestCase
     }
 
     #[Test]
+    public function it_drops_a_constrained_foreign_id_without_losing_existing_data()
+    {
+        $parent = 'fk_drop_helper_parents';
+        $child = 'fk_drop_helper_children';
+        try {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+            Schema::create($parent, fn (Blueprint $table) => $table->id());
+            Schema::create($child, function (Blueprint $table) use ($parent) {
+                $table->id();
+                $table->string('name', 40);
+                $table->foreignId('parent_id')->constrained($parent);
+            });
+            $this->assertForeignKeyDefinition($child, ['parent_id'], $parent, ['id']);
+            $foreignName = Schema::getForeignKeys($child)[0]['name'];
+            DB::table($parent)->insert(['id' => 1]);
+            DB::table($child)->insert(['id' => 1, 'name' => 'Saved child', 'parent_id' => 1]);
+            $this->assertRejectedForeignKeyInsert($child, ['id' => 2, 'name' => 'Invalid child', 'parent_id' => 999]);
+            $before = $this->readLifecycleColumnMetadata($child);
+
+            Schema::table($child, fn (Blueprint $table) => $table->dropConstrainedForeignId('parent_id'));
+
+            $this->assertSame([], Schema::getForeignKeys($child));
+            $this->assertNull(DB::selectOne(<<<'SQL'
+                SELECT RDB$CONSTRAINT_NAME
+                FROM RDB$RELATION_CONSTRAINTS
+                WHERE RDB$RELATION_NAME = ? AND RDB$CONSTRAINT_NAME = ?
+            SQL, [$child, $foreignName]));
+            $this->assertFalse(Schema::hasColumn($child, 'parent_id'));
+            $columns = $this->readLifecycleColumnMetadata($child);
+            $this->assertSame(['id', 'name'], array_column($columns, 'name'));
+            $this->assertSame(array_slice($before, 0, 2), $columns);
+            $this->assertEquals([(object) ['id' => 1, 'name' => 'Saved child']], DB::table($child)->get()->all());
+            $this->assertEquals([(object) ['id' => 1]], DB::table($parent)->get()->all());
+
+            DB::table($child)->insert(['id' => 2, 'name' => 'New child']);
+            $this->assertEquals([
+                (object) ['id' => 1, 'name' => 'Saved child'],
+                (object) ['id' => 2, 'name' => 'New child'],
+            ], DB::table($child)->orderBy('id')->get()->all());
+        } finally {
+            Schema::dropIfExists($child);
+            Schema::dropIfExists($parent);
+        }
+    }
+
+    #[Test]
     public function it_cascades_parent_deletion_to_constrained_children()
     {
         $parent = 'fk_cascade_parents';
