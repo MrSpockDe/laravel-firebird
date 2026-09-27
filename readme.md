@@ -1,4 +1,4 @@
-# Firebird for Laravel — independent mrspockde package
+# Firebird Database Driver for Laravel
 
 [![Latest release (including prereleases)](https://img.shields.io/github/v/release/MrSpockDe/laravel-firebird?include_prereleases&label=release)](https://github.com/MrSpockDe/laravel-firebird/releases)
 [![Total Downloads](https://poser.pugx.org/mrspockde/laravel-firebird/downloads)](https://packagist.org/packages/mrspockde/laravel-firebird)

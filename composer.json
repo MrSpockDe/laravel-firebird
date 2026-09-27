@@ -1,7 +1,16 @@
 {
   "$schema": "https://getcomposer.org/schema.json",
   "name": "mrspockde/laravel-firebird",
-  "description": "Firebird database driver for the Laravel Framework",
+  "description": "Firebird database driver for Laravel with Eloquent, Schema Builder and migration support",
+  "keywords": [
+    "laravel",
+    "firebird",
+    "database",
+    "pdo",
+    "eloquent",
+    "schema-builder",
+    "migrations"
+  ],
   "license": "MIT",
   "require": {
     "php": "^8.2",
