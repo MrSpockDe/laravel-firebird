@@ -2559,6 +2559,113 @@ class MigrationTest extends TestCase
         ];
     }
 
+    #[Test]
+    #[DataProvider('rc1StorageHelpers')]
+    public function it_preserves_storage_helper_metadata_and_data_through_drop(string $method, int $type, ?int $length, ?int $subtype, string $value)
+    {
+        $name = 'storage_helper_lifecycle';
+        try {
+            Schema::create($name, function (Blueprint $table) use ($method) {
+                $table->id();
+                $table->string('label', 40);
+                $table->{$method}('value')->nullable();
+            });
+            $columns = $this->readLifecycleColumnMetadata($name);
+            $this->assertSame($type, $columns[2]['field_type']);
+            $this->assertSame($length, $columns[2]['length']);
+            $this->assertSame(0, $columns[2]['null_flag']);
+            if ($subtype !== null) {
+                $metadata = $this->readTimeZoneColumnMetadata($name);
+                $this->assertSame($subtype, $metadata[2]->field_sub_type);
+            }
+
+            DB::table($name)->insert(['id' => 1, 'label' => 'Saved row', 'value' => $value]);
+            DB::table($name)->insert(['id' => 2, 'label' => 'Null row', 'value' => null]);
+            $this->assertSame($value, DB::table($name)->where('id', 1)->value('value'));
+            $this->assertNull(DB::table($name)->where('id', 2)->value('value'));
+
+            Schema::table($name, fn (Blueprint $table) => $table->dropColumn('value'));
+
+            $this->assertSame(array_slice($columns, 0, 2), $this->readLifecycleColumnMetadata($name));
+            $this->assertEquals([
+                (object) ['id' => 1, 'label' => 'Saved row'],
+                (object) ['id' => 2, 'label' => 'Null row'],
+            ], DB::table($name)->orderBy('id')->get()->all());
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    public static function rc1StorageHelpers(): iterable
+    {
+        yield 'mediumText' => ['mediumText', 261, null, 1, str_repeat("Grüße 日本語 – O'Reilly\n", 1000)];
+        yield 'longText' => ['longText', 261, null, 1, str_repeat("Grüße 日本語 – O'Reilly\n", 1000)];
+        yield 'date' => ['date', 12, null, null, '2024-02-29'];
+        yield 'time' => ['time', 13, null, null, '12:34:56'];
+        yield 'ipAddress' => ['ipAddress', 37, 45, null, '2001:db8:85a3::8a2e:370:7334'];
+        yield 'macAddress' => ['macAddress', 37, 17, null, '02:42:ac:11:00:02'];
+    }
+
+    #[Test]
+    public function it_preserves_decimal_precision_scale_and_signed_values()
+    {
+        $name = 'decimal_metadata_lifecycle';
+        try {
+            Schema::create($name, function (Blueprint $table) {
+                $table->id();
+                $table->decimal('amount', 12, 2);
+            });
+            $column = $this->readTimeZoneColumnMetadata($name)[1];
+            $this->assertSame(16, $column->field_type);
+            $this->assertSame(2, $column->field_sub_type);
+            $this->assertSame(12, $column->field_precision);
+            $this->assertSame(-2, $column->field_scale);
+            foreach ([1 => '1234567890.12', 2 => '-9876543210.98'] as $id => $value) {
+                DB::table($name)->insert(['id' => $id, 'amount' => $value]);
+                $this->assertSame($value, (string) DB::table($name)->where('id', $id)->value('amount'));
+            }
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
+    #[Test]
+    public function it_drops_timezone_timestamps_without_losing_existing_data()
+    {
+        $name = 'drop_timestamps_tz_lifecycle';
+        try {
+            Schema::create($name, function (Blueprint $table) {
+                $table->id();
+                $table->string('label', 40);
+                $table->timestampsTz();
+            });
+            $before = $this->readLifecycleColumnMetadata($name);
+            $metadata = $this->readTimeZoneColumnMetadata($name);
+            $this->assertSame(['created_at', 'updated_at'], array_column(array_slice($metadata, 2), 'name'));
+            foreach (array_slice($metadata, 2) as $column) {
+                $this->assertSame(29, $column->field_type);
+                $this->assertSame(0, $column->null_flag);
+            }
+            DB::table($name)->insert([
+                'id' => 1, 'label' => 'Saved row',
+                'created_at' => '2026-01-15 12:00:00 +02:00',
+                'updated_at' => '2026-01-15 13:00:00 +02:00',
+            ]);
+
+            Schema::table($name, fn (Blueprint $table) => $table->dropTimestampsTz());
+
+            $this->assertSame(array_slice($before, 0, 2), $this->readLifecycleColumnMetadata($name));
+            $this->assertEquals([(object) ['id' => 1, 'label' => 'Saved row']], DB::table($name)->get()->all());
+            DB::table($name)->insert(['id' => 2, 'label' => 'New row']);
+            $this->assertEquals([
+                (object) ['id' => 1, 'label' => 'Saved row'],
+                (object) ['id' => 2, 'label' => 'New row'],
+            ], DB::table($name)->orderBy('id')->get()->all());
+        } finally {
+            Schema::dropIfExists($name);
+        }
+    }
+
     private function readTimeZoneColumnMetadata(string $table): array
     {
         return DB::select(<<<'SQL'
