@@ -11,19 +11,14 @@ It adds Firebird PDO support, schema operations and Eloquent integration to Lara
 It derives from the original [harrygulliford/laravel-firebird project](https://github.com/harrygulliford/laravel-firebird);
 upstream ownership and contributor credits are preserved below.
 
-> **Published beta:** `v4.0.0-beta.1` is available as a
-> [GitHub prerelease](https://github.com/MrSpockDe/laravel-firebird/releases/tag/v4.0.0-beta.1)
+> **Published release candidate:** `v4.0.0-rc.1` is available as a
+> [GitHub prerelease](https://github.com/MrSpockDe/laravel-firebird/releases/tag/v4.0.0-rc.1)
 > and on [Packagist](https://packagist.org/packages/mrspockde/laravel-firebird).
-> See the [release notes](releases/v4.0.0-beta.1.md). This is a beta, not a stable
-> or production-ready release. The upstream package's identically numbered
-> release is a different artifact.
-
-> **RC1 preparation:** The `4.x` development branch has completed technical migration
-> hardening for the planned `v4.0.0-rc.1`. RC1 is **not yet published**; the beta
-> above remains the available release. The [current support reference](docs/migration-support.md)
-> describes integration-tested operations and deliberate Firebird limitations.
-> See the [roadmap](docs/roadmap.md) and [draft RC1 notes](releases/v4.0.0-rc.1.md).
-> A release candidate is not a stable release or a production-readiness guarantee.
+> Fresh consumers of the published artifact passed Laravel 12/13 × Firebird 4/5
+> (4/4 combinations). OweFlow's RC1 upgrade passed 88 tests / 493 assertions.
+> See the [release notes and validation evidence](releases/v4.0.0-rc.1.md),
+> [support reference](docs/migration-support.md) and [roadmap](docs/roadmap.md).
+> RC1 is a prerelease, not a stable release or a production-readiness guarantee.
 
 ## Version Support
 
@@ -40,19 +35,19 @@ other platforms and future PHP versions are not established by this matrix.
 
 ## Installation
 
-Install the exact published beta from Packagist; no custom VCS repository is needed:
+Install the exact published RC1 from Packagist; no custom VCS repository is needed:
 
 ```bash
-composer require "mrspockde/laravel-firebird:4.0.0-beta.1"
+composer require "mrspockde/laravel-firebird:4.0.0-rc.1"
 ```
 
 When switching from the earlier fork development setup, remove the custom
 `firebird` VCS repository entry from `composer.json` as part of the switch.
-The `4.x-dev` constraint follows ongoing development and is not the pinned beta.
-See the [validation evidence](releases/v4.0.0-beta.1.md#release-and-validation-evidence)
-for the separate development-commit and published-beta checks.
+The `4.x-dev` constraint follows ongoing development and is not the pinned RC1.
+See the [validation evidence](releases/v4.0.0-rc.1.md#published-consumer-validation)
+for the checks against the published RC1 artifact.
 
-The explicit beta constraint permits this package while retaining the application's
+The explicit RC constraint permits this package while retaining the application's
 `minimum-stability: stable`. Do not install it alongside
 `harrygulliford/laravel-firebird`; Composer declares a conflict with that package.
 For an existing consumer, remove the old requirement and resolve the new one in
@@ -134,9 +129,11 @@ it is not a promise of full Laravel API parity.
 At technical baseline `7a68ea3`, the full local suite passed on Firebird 4 and 5,
 each with 646 tests / 4563 assertions. [CI](https://github.com/MrSpockDe/laravel-firebird/actions/runs/36324558893)
 passed all 28 matrix jobs plus `ci-success` for the version matrix above.
-These are development-branch results, not validation of an installed RC1.
-The [published beta notes](releases/v4.0.0-beta.1.md) retain their historical scope;
-[RC1 notes](releases/v4.0.0-rc.1.md) are preparation only.
+These are technical hardening results. The final RC1 release commit is
+`6eb93babee699c3b25dbc6481252d44d6277a971`; subsequent published-artifact
+consumer validation passed Laravel 12/13 × Firebird 4/5 and OweFlow separately.
+See the [RC1 evidence](releases/v4.0.0-rc.1.md#published-consumer-validation).
+The [beta notes](releases/v4.0.0-beta.1.md) retain their historical scope.
 
 Important boundaries include signed integer mappings without unsigned range
 semantics, JSON text storage, ENUM as VARCHAR+CHECK, restricted ALTER operations

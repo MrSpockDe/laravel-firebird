@@ -1,9 +1,10 @@
 # Laravel Firebird roadmap
 
-The `4.x` branch has reached the technical hardening baseline for preparation of
-`v4.0.0-rc.1`: `7a68ea3fafbc655a829cd92fefbe431a5e3db298`. RC1 is not yet published;
-`v4.0.0-beta.1` remains the published version. A release candidate is not a stable
-release. This roadmap describes achieved scope and remaining boundaries, not
+Published `v4.0.0-rc.1` uses release commit
+`6eb93babee699c3b25dbc6481252d44d6277a971`, following technical hardening baseline
+`7a68ea3fafbc655a829cd92fefbe431a5e3db298`. It is available as a GitHub prerelease
+and through Packagist. A release candidate is not a stable release.
+This roadmap describes achieved scope and remaining boundaries, not
 complete Laravel API parity. The [support reference](migration-support.md) defines
 the tested details and restrictions.
 
@@ -82,12 +83,15 @@ including the optional BIGINT recommendation for application timestamps beyond
 January 2038. Raw-expression CAST requirements and client-dependent empty-BLOB
 fetch behavior also remain documented boundaries.
 
-## Release preparation and post-4.0
+## Completed RC1 publication and post-4.0
 
-The next release steps require separate review: final RC1 SHA/tag, GitHub
-prerelease, Packagist availability and fresh installation/consumer validation with
-Laravel 12, Laravel 13 and OweFlow. None is established by this documentation pass;
-see the [draft release notes](../releases/v4.0.0-rc.1.md).
+Completed: final release SHA `6eb93babee699c3b25dbc6481252d44d6277a971`, annotated
+tag `v4.0.0-rc.1`, GitHub prerelease and verified Packagist availability.
+Fresh consumers of the published Dist artifact passed all four Laravel 12/13 ×
+Firebird 4/5 combinations. OweFlow also upgraded to the published RC1 and passed
+88 tests / 493 assertions, with no pending migrations. See the
+[release notes](../releases/v4.0.0-rc.1.md#published-consumer-validation) for the
+consumer versions and evidence, distinct from the technical baseline CI above.
 
 Post-4.0 work should be driven by reproducible consumer needs: additional ALTER
 conversions, specialized features with a safe Firebird mapping, broader zone/client

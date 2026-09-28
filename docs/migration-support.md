@@ -1,9 +1,15 @@
 # Laravel migration support
 
-Current support reference for the `4.x` RC1 preparation, based on technical baseline
-`7a68ea3fafbc655a829cd92fefbe431a5e3db298`. This describes the tested development
-branch, not a claim that RC1 is published or that every feature has Laravel API parity.
-The published version remains `v4.0.0-beta.1`; a release candidate is not a stable release.
+Current support reference for published `v4.0.0-rc.1`, based on technical hardening
+baseline `7a68ea3fafbc655a829cd92fefbe431a5e3db298`. The final release commit is
+`6eb93babee699c3b25dbc6481252d44d6277a971`. RC1 is a GitHub prerelease available
+through Packagist, not a stable release or a guarantee of Laravel API parity.
+
+After publication, fresh consumers installed the RC1 Packagist Dist artifact and
+passed all four Laravel 12/13 × Firebird 4/5 combinations. OweFlow's upgrade to
+the published RC1 passed 88 tests / 493 assertions. See the
+[release and consumer evidence](../releases/v4.0.0-rc.1.md#published-consumer-validation)
+for exact versions and scope; these checks are separate from the hardening results below.
 
 At this baseline the full local suite passed on Firebird 4 and 5, each with
 646 tests / 4563 assertions. [CI](https://github.com/MrSpockDe/laravel-firebird/actions/runs/36324558893)
